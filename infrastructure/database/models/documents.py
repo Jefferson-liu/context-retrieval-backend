@@ -1,11 +1,8 @@
 from sqlalchemy import Column, Integer, String, Text, DateTime, create_engine, ForeignKey, Table, text, LargeBinary, Boolean
-from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, relationship
 from datetime import datetime
 from pgvector.sqlalchemy import Vector
-
-
-Base = declarative_base()
+from infrastructure.database.database import Base
 
 
 class UploadedDocument(Base):

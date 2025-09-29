@@ -7,5 +7,4 @@ load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), '..', '..', '.en
 DATABASE_URL = os.getenv("DATABASE_URL")
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
 GIT_REPO_PATH = os.getenv("GIT_REPO_PATH")
-REDIS_URL = os.getenv("REDIS_URL")
 
