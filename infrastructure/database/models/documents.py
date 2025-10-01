@@ -38,8 +38,6 @@ class Embedding(Base):
     chunk_id = Column(Integer, ForeignKey("chunks.id", ondelete="CASCADE"), primary_key=True)
 
     embedding = Column(Vector)       
-    tfidf_embedding = Column(Vector) 
-
     created_date = Column(DateTime, default=datetime.now(datetime.UTC))
 
     chunk = relationship("Chunk", back_populates="embedding", uselist=False)

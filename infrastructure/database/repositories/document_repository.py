@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
 from infrastructure.database.models.documents import UploadedDocument, Chunk, Embedding
 
 class DocumentRepository:
-    """Repository pattern for UploadedDocument and Chunk database operations"""
+    """Repository pattern for UploadedDocument database operations"""
     
     def __init__(self, db: Session):
         self.db = db
@@ -19,6 +19,15 @@ class DocumentRepository:
         self.db.add(new_document)
         return new_document
 
+    def edit_document(self, doc_id: int, **kwargs) -> Optional[UploadedDocument]:
+        document = self.db.query(UploadedDocument).filter(UploadedDocument.id == doc_id).first()
+        if document:
+            for key, value in kwargs.items():
+                setattr(document, key, value)
+            self.db.commit()
+            return document
+        raise ValueError(f"Document with ID {doc_id} not found.")
+    
     def get_all_documents(self) -> List[UploadedDocument]:
         """Get all documents from the database"""
         return self.db.query(UploadedDocument).all()
@@ -32,32 +41,5 @@ class DocumentRepository:
         document = self.get_document_by_id(document_id)
         if document:
             self.db.delete(document)
-            return True
-        return False
-
-    def create_chunk(self, doc_id: int, chunk_order: int, content: str, raw_content: str) -> Chunk:
-        """Create a new chunk record"""
-        new_chunk = Chunk(
-            doc_id=doc_id,
-            chunk_order=chunk_order,
-            content=content,
-            raw_content=raw_content,
-        )
-        self.db.add(new_chunk)
-        return new_chunk
-
-    def get_chunks_by_document_id(self, document_id: int) -> List[Chunk]:
-        """Get all chunks associated with a specific document ID"""
-        return self.db.query(Chunk).filter(Chunk.doc_id == document_id).all()
-    
-    def get_chunk_by_id(self, chunk_id: int) -> Optional[Chunk]:
-        """Get a single chunk by its ID"""
-        return self.db.query(Chunk).filter(Chunk.id == chunk_id).first()
-    
-    def delete_chunk(self, chunk_id: int) -> bool:
-        """Delete a chunk by its ID"""
-        chunk = self.get_chunk_by_id(chunk_id)
-        if chunk:
-            self.db.delete(chunk)
             return True
         return False

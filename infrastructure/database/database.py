@@ -1,10 +1,10 @@
 from sqlalchemy import create_engine
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
-from config.settings import settings
+from config.settings import DATABASE_URL
 
-# Database URL
-DATABASE_URL = settings.DATABASE_URL
+if DATABASE_URL is None:
+    raise ValueError("DATABASE_URL environment variable is not set. Please set it in your .env file.")
 
 # Create engine
 engine = create_engine(DATABASE_URL, echo=True)  # Set echo=False in production
@@ -21,3 +21,6 @@ def get_db():
         yield db
     finally:
         db.close()
+
+def create_tables():
+    Base.metadata.create_all(bind=engine)
