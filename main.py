@@ -27,8 +27,8 @@ app.add_middleware(
 )
 
 # Include routers
-app.include_router(upload_router, prefix="/api/v1", tags=["Upload"])
-app.include_router(search_router, prefix="/api/v1", tags=["Search"])
+app.include_router(upload_router, prefix="/api", tags=["Upload"])
+app.include_router(search_router, prefix="/api", tags=["Search"])
 
 # Startup event: Create DB tables
 @app.on_event("startup")

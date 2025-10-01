@@ -25,7 +25,7 @@ class Chunk(Base):
     chunk_order = Column(Integer)
     content = Column(Text)             # contextualized chunk text
     raw_content = Column(Text)         # raw editable text
-    created_date = Column(DateTime, default=datetime.now(datetime.UTC))
+    created_date = Column(DateTime, default=datetime.now())
 
     document = relationship("UploadedDocument", back_populates="chunks")
     embedding = relationship("Embedding", back_populates="chunk", uselist=False, cascade="all, delete-orphan")
@@ -38,6 +38,6 @@ class Embedding(Base):
     chunk_id = Column(Integer, ForeignKey("chunks.id", ondelete="CASCADE"), primary_key=True)
 
     embedding = Column(Vector)       
-    created_date = Column(DateTime, default=datetime.now(datetime.UTC))
+    created_date = Column(DateTime, default=datetime.now())
 
     chunk = relationship("Chunk", back_populates="embedding", uselist=False)
