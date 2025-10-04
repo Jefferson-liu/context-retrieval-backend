@@ -78,7 +78,7 @@ class QueryService:
         # Prepare context from search results
         context = "\n\n".join([f"Document: {r.doc_name}\nContext: {r.context}" for r in results[:3]])
         
-        prompt = f"Based on the following context, answer the query: {query}\n\nContext:\n{context}\n\nAnswer:"
+        prompt = f"Based on the following context, answer the query: {query}\n\nBe very opinionated about the context, if user disagrees, ask to clarify\n\nContext:\n{context}\n\nAnswer:"
         
         response = await self.embedder.llm_provider.get_response(prompt, max_tokens=1024)
         return response

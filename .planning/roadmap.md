@@ -9,9 +9,6 @@
 - [ ] Backfill legacy product docs, generate embeddings, validate recall/precision.
 - [ ] Introduce `VectorStoreGateway` abstraction and dual-write flow so we can benchmark Milvus alongside pgvector before cutover.
   - In progress: `PgVectorStore` now drives scoped upserts/search; Milvus driver & dual-write toggle still outstanding.
-- [x] Add tenant/project columns to all document + chunk tables and enforce repository-level scoping checks.
-  - Implemented via Alembic revision `20251003_multi_tenant_core`, repository refactors, and request-context wiring (`ContextScope`).
-  - Runtime RLS + default tenant seeding now configured during app startup (`configure_multi_tenant_rls`, `seed_default_tenant_and_project`).
 
 ## Phase 2 – Metadata & Versioning Enrichment
 - Extend schema with:

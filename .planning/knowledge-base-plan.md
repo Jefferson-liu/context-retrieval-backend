@@ -10,7 +10,6 @@ Build a reliable, auto-updating memory layer that product-facing assistants can 
 - `.planning/milestone-document-editing-service.md` – editable source workflow with reprocessing + git integration.
 - `.planning/milestone-intent-resolver.md` – query context resolution and terminology intelligence.
 - `.planning/milestone-conflict-review-workflow.md` – detection + manual resolution loop for conflicting assertions.
-- `.planning/milestone-multi-tenant-data-layer.md` – tenant/project isolation across data and access layers (active draft: `.planning/draft-multi-tenant-data-layer.md`).
 
 ## Core Capabilities
 - **Document Intake**: Async API for uploading product specs, release notes, tickets, chat transcripts; automatic chunking and embedding.
@@ -86,9 +85,9 @@ Build a reliable, auto-updating memory layer that product-facing assistants can 
    4. Service updates document, reprocesses chunk, commits change (`Update document: ...`), and invalidates/refreshes cached responses.
    5. Conflict detector reviews whether updated statement contradicts existing assertions.
 
-## Multi-Tenant Context Awareness *(see `milestone-multi-tenant-data-layer.md` & `milestone-intent-resolver.md`)*
-- **Tenant & Project Model**: Introduce `tenants`, `projects`, and `user_project_roles` tables. Documents and knowledge artifacts carry both identifiers to prevent data leakage while letting a user operate across multiple products.
-- **Row-Level Security**: Enforce `(tenant_id, project_id)` filters at the repository layer and, where supported, at the database level (PostgreSQL RLS) to guarantee isolation.
+## Multi-Tenant Context Awareness *(see `milestone-intent-resolver.md`)*
+- **Tenant & Project Model**: `tenants`, `projects`, and `user_project_roles` tables now back every document and knowledge artifact so users only view their scoped data.
+- **Row-Level Security**: `(tenant_id, project_id)` filters run through both repository checks and PostgreSQL RLS to guarantee isolation.
 - **Context Resolver**: `IntentResolverService` maps user utterances to the appropriate project by blending:
    - recent conversation signals,
    - explicit user selection (if provided), and
