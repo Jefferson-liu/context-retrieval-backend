@@ -1,0 +1,6 @@
+# Milvus End-to-End Smoke Test
+
+This document is ingested during automated UAT, chunked, embedded, and indexed in Milvus.
+It includes a unique phrase: "Vector coffee roasters" to make retrieval easy to verify.
+
+Keep calm and retrieve vectors.

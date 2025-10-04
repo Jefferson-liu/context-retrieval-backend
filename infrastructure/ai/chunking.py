@@ -1,5 +1,6 @@
 from typing import List, Dict
 from langchain_text_splitters import MarkdownHeaderTextSplitter, RecursiveCharacterTextSplitter
+import asyncio
 
 class Chunker:
     def __init__(self):
@@ -10,6 +11,7 @@ class Chunker:
         """
         Chunk general documents by paragraphs and semantic boundaries
         """
+        loop = asyncio.get_event_loop()
         headers_to_split_on = [
             ("#", "header 1"),
             ("##", "header 2"),
@@ -21,12 +23,12 @@ class Chunker:
             chunk_overlap=self.overlap_size
         )
         
-        sections = md_splitter.split_text(content)
+        sections = await loop.run_in_executor(None, md_splitter.split_text, content)
         
         for section in sections:
             section.metadata["source"] = filename
 
-        chunks = await text_splitter.atransform_documents(sections)
+        chunks = await loop.run_in_executor(None, text_splitter.transform_documents, sections)
         
         results = []
         for chunk in chunks:

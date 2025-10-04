@@ -1,49 +1,58 @@
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
+from infrastructure.context import ContextScope
 from infrastructure.database.repositories.query_repository import QueryRepository
-from infrastructure.database.repositories.search_repository import SearchRepository
 from infrastructure.ai.embedding import Embedder
+from infrastructure.vector_store import create_vector_store
 from typing import Dict, Any
 
 class QueryService:
     """Service for processing user queries, performing searches, and generating responses."""
     
-    def __init__(self, db: Session):
+    def __init__(self, db: AsyncSession, context: ContextScope):
         self.db = db
-        self.query_repo = QueryRepository(db)
-        self.search_repo = SearchRepository(db)
+        self.context = context
+        self.query_repo = QueryRepository(db, context)
         self.embedder = Embedder()
+        self.vector_store = create_vector_store(db)
     
     async def process_query(self, query_text: str) -> Dict[str, Any]:
         """Process a query: create query, search, generate response, store results."""
         # Create query record
-        query = self.query_repo.create_query(query_text)
+        query = await self.query_repo.create_query(query_text)
+        
+        # Generate embedding for search
+        query_embedding = await self.embedder.generate_embedding(query_text)
+        
+        # Perform semantic search
+        search_results = await self.vector_store.search(
+            query_embedding,
+            tenant_id=self.context.tenant_id,
+            project_ids=self.context.project_ids,
+            top_k=5,
+        )
+        
+        # Create response record (placeholder)
+        response = await self.query_repo.create_response(query.id)
         
         try:
-            # Generate embedding for search
-            query_embedding = await self.embedder.generate_embedding(query_text)
+            # Generate response using LLM
+            response_text = await self._generate_response_text(query_text, search_results)
             
-            # Perform semantic search
-            search_results = self.search_repo.semantic_vector_search(query_embedding, top_k=5)
-            
-            # Generate response (placeholder: summarize top results)
-            response_text = self._generate_response_text(query_text, search_results)
-            
-            # Create response record
-            response = self.query_repo.create_response(query.id, response_text, status='success')
-            
+            # Update the response with the generated text
+            response = await self.query_repo.update_response_text(response.id, response_text)
+                            
             # Create sources
             for result in search_results:
-                self.query_repo.add_source(
+                await self.query_repo.add_source(
                     response_id=response.id,
                     chunk_id=result.chunk_id,
-                    doc_id=result.file_id,
-                    doc_name=result.filename,
-                    snippet=result.content[:200]  # Snippet
+                    doc_id=result.doc_id,
+                    doc_name=result.doc_name,
+                    snippet=result.content
                 )
             
             # Update query status
-            query.status = 'success'
-            self.db.commit()
+            await self.query_repo.update_response_status(response.id, 'success')
             
             return {
                 "query_id": query.id,
@@ -51,22 +60,25 @@ class QueryService:
                 "sources": [
                     {
                         "chunk_id": r.chunk_id,
-                        "doc_name": r.filename,
-                        "snippet": r.content[:200]
+                        "doc_name": r.doc_name,
+                        "snippet": r.content
                     } for r in search_results
                 ]
             }
         except Exception as e:
-            # Handle failure
-            query.status = 'failed'
-            self.db.commit()
+            await self.db.rollback()  # Reset session state after rollback
+            await self.query_repo.update_response_status(response.id, 'failed')
             raise e
     
-    def _generate_response_text(self, query: str, results: list) -> str:
-        """Generate response text from search results (placeholder logic)."""
+    async def _generate_response_text(self, query: str, results: list) -> str:
+        """Generate response text from search results using LLM."""
         if not results:
             return "No relevant information found."
         
-        # Simple concatenation of top results
-        top_content = " ".join([r.content for r in results[:3]])
-        return f"Based on the documents: {top_content[:500]}..."
+        # Prepare context from search results
+        context = "\n\n".join([f"Document: {r.doc_name}\nContext: {r.context}" for r in results[:3]])
+        
+        prompt = f"Based on the following context, answer the query: {query}\n\nContext:\n{context}\n\nAnswer:"
+        
+        response = await self.embedder.llm_provider.get_response(prompt, max_tokens=1024)
+        return response

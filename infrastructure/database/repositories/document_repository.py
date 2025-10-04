@@ -1,45 +1,76 @@
 from typing import List, Optional
-from sqlalchemy.orm import Session
-from infrastructure.database.models.documents import UploadedDocument, Chunk, Embedding
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+from infrastructure.context import ContextScope
+from infrastructure.database.models.documents import Document, Chunk, Embedding
 
 class DocumentRepository:
-    """Repository pattern for UploadedDocument database operations"""
+    """Repository pattern for Document database operations"""
     
-    def __init__(self, db: Session):
+    def __init__(self, db: AsyncSession, context: ContextScope):
         self.db = db
+        self.context = context
     
-    def create_document(self, doc_name: str, content: str, doc_size: int, doc_type: str) -> UploadedDocument:
+    async def create_document(self, doc_name: str, content: str, doc_size: int, doc_type: str) -> Document:
         """Create a new document record"""
-        new_document = UploadedDocument(
+        new_document = Document(
             doc_name=doc_name,
             content=content,
             doc_size=doc_size,
-            doc_type=doc_type
+            doc_type=doc_type,
+            tenant_id=self.context.tenant_id,
+            project_id=self.context.primary_project(),
+            created_by_user_id=self.context.user_id,
         )
         self.db.add(new_document)
+        await self.db.flush()
         return new_document
 
-    def edit_document(self, doc_id: int, **kwargs) -> Optional[UploadedDocument]:
-        document = self.db.query(UploadedDocument).filter(UploadedDocument.id == doc_id).first()
+    async def edit_document(self, doc_id: int, **kwargs) -> Optional[Document]:
+        stmt = select(Document).where(
+            Document.id == doc_id,
+            Document.tenant_id == self.context.tenant_id,
+            Document.project_id.in_(self.context.project_ids),
+        )
+        result = await self.db.execute(stmt)
+        document = result.scalar_one_or_none()
         if document:
             for key, value in kwargs.items():
                 setattr(document, key, value)
-            self.db.commit()
+            await self.db.commit()
             return document
         raise ValueError(f"Document with ID {doc_id} not found.")
     
-    def get_all_documents(self) -> List[UploadedDocument]:
+    async def get_all_documents(self) -> List[Document]:
         """Get all documents from the database"""
-        return self.db.query(UploadedDocument).all()
+        stmt = select(Document).where(
+            Document.tenant_id == self.context.tenant_id,
+            Document.project_id.in_(self.context.project_ids),
+        )
+        result = await self.db.execute(stmt)
+        return result.scalars().all()
     
-    def get_document_by_id(self, document_id: int) -> Optional[UploadedDocument]:
+    async def get_document_by_id(self, document_id: int) -> Optional[Document]:
         """Get a single document by ID"""
-        return self.db.query(UploadedDocument).filter(UploadedDocument.id == document_id).first()
+        stmt = select(Document).where(
+            Document.id == document_id,
+            Document.tenant_id == self.context.tenant_id,
+            Document.project_id.in_(self.context.project_ids),
+        )
+        result = await self.db.execute(stmt)
+        return result.scalar_one_or_none()
     
-    def delete_document(self, document_id: int) -> bool:
+    async def delete_document(self, document_id: int) -> bool:
         """Delete a document by ID"""
-        document = self.get_document_by_id(document_id)
+        stmt = select(Document).where(
+            Document.id == document_id,
+            Document.tenant_id == self.context.tenant_id,
+            Document.project_id.in_(self.context.project_ids),
+        )
+        result = await self.db.execute(stmt)
+        document = result.scalar_one_or_none()
         if document:
-            self.db.delete(document)
+            await self.db.delete(document)
+            await self.db.commit()
             return True
         return False

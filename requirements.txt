@@ -3,6 +3,7 @@ anthropic
 anyio
 asyncpg
 attrs
+alembic
 certifi
 cffi
 charset-normalizer
@@ -41,6 +42,7 @@ nltk
 numpy
 orjson
 packaging
+pymilvus
 pgvector
 pillow
 pluggy
