@@ -1,6 +1,6 @@
 from sqlalchemy.ext.asyncio import AsyncSession
 from infrastructure.context import ContextScope
-from infrastructure.database.repositories import DocumentRepository, QueryRepository, ChunkRepository
+from infrastructure.database.repositories import DocumentRepository, ChunkRepository
 from infrastructure.ai.chunking import Chunker
 from infrastructure.ai.embedding import Embedder
 from infrastructure.version_control.git_service import GitService
@@ -13,7 +13,6 @@ class DocumentProcessingService:
         self.context = context
         self.document_repository = DocumentRepository(db, context)
         self.chunk_repository = ChunkRepository(db, context)
-        self.query_repository = QueryRepository(db, context)
         self.chunker = Chunker()
         self.embedder = Embedder()
         self.git_service = GitService()
@@ -126,8 +125,3 @@ class DocumentProcessingService:
                 await self.git_service.commit_changes(message=message, removed_paths=[file_path])
         return success
     
-    async def list_documents(self):
-        return await self.document_repository.get_all_documents()
-    
-    async def get_document(self, document_id: int):
-        return await self.document_repository.get_document_by_id(document_id)

@@ -1,5 +1,6 @@
 from fastapi import APIRouter, UploadFile, File, Depends, HTTPException
 from services.document.processing import DocumentProcessingService
+from services.document.retrieval import DocumentRetrievalService
 from infrastructure.context import RequestContextBundle
 from routers.dependencies import get_request_context_bundle
 
@@ -41,7 +42,7 @@ async def list_documents(context_bundle: RequestContextBundle = Depends(get_requ
     """
     Retrieve a list of all uploaded documents.
     """
-    service = DocumentProcessingService(context_bundle.db, context_bundle.scope)
+    service = DocumentRetrievalService(context_bundle.db, context_bundle.scope)
     docs = await service.list_documents()
     return {"documents": [{"id": d.id, "name": d.doc_name, "type": d.doc_type} for d in docs]}
 
@@ -50,7 +51,7 @@ async def get_document(doc_id: int, context_bundle: RequestContextBundle = Depen
     """
     Retrieve details of a specific document by ID.
     """
-    service = DocumentProcessingService(context_bundle.db, context_bundle.scope)
+    service = DocumentRetrievalService(context_bundle.db, context_bundle.scope)
     doc = await service.get_document(doc_id)
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")

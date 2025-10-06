@@ -142,5 +142,14 @@ class ChunkRepository:
         return count
     
     
-    
+    async def get_content_by_chunk_id(self, chunk_id: int) -> Optional[str]:
+        """Retrieve the content of a chunk by its ID"""
+        stmt = select(Chunk.content).where(
+            Chunk.id == chunk_id,
+            Chunk.tenant_id == self.context.tenant_id,
+            Chunk.project_id.in_(self.context.project_ids),
+        )
+        result = await self.db.execute(stmt)
+        row = result.scalar_one_or_none()
+        return row if row else None
     

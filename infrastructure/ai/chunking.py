@@ -16,8 +16,9 @@ class Chunker:
             ("#", "header 1"),
             ("##", "header 2"),
             ("###", "header 3"),
+            ("####", "header 4"),
         ]
-        md_splitter = MarkdownHeaderTextSplitter(headers_to_split_on)
+        md_splitter = MarkdownHeaderTextSplitter(headers_to_split_on, strip_headers=False)
         text_splitter = RecursiveCharacterTextSplitter(
             chunk_size=self.chunk_size,
             chunk_overlap=self.overlap_size

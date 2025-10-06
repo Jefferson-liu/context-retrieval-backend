@@ -11,7 +11,7 @@ class PromptLoader:
     
     def load_prompt(self, prompt_name: str) -> str:
         """
-        Load a prompt from a markdown file as-is.
+        Load a prompt from a markdown file to be used in a langchain prompt template.
         
         Args:
             prompt_name: Name of the prompt file (without .md extension)
@@ -24,17 +24,22 @@ class PromptLoader:
             return self._cache[prompt_name]
         
         # Read the file
-        prompt_file = self._prompts_dir / f"{prompt_name}.md"
+        system = self._prompts_dir / f"{prompt_name}" / "system.md"
+        user = self._prompts_dir / f"{prompt_name}" / "user.md"
         
-        if not prompt_file.exists():
-            raise FileNotFoundError(f"Prompt file not found: {prompt_file}")
+        if not system.exists():
+            raise FileNotFoundError(f"Prompt system file not found: {prompt_name}")
+        if not user.exists():
+            raise FileNotFoundError(f"Prompt user file not found: {prompt_name}")
         
-        with open(prompt_file, 'r', encoding='utf-8') as file:
-            content = file.read()
+        with open(system, 'r', encoding='utf-8') as file:
+            system_content = file.read()
+        with open(user, 'r', encoding='utf-8') as file:
+            user_content = file.read()
         
         # Cache and return
-        self._cache[prompt_name] = content
-        return content
+        self._cache[prompt_name] = {"system": system_content, "user": user_content}
+        return self._cache[prompt_name]
     
     def reload_prompt(self, prompt_name: str) -> str:
         """Force reload a prompt from disk."""

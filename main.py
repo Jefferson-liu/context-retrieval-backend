@@ -13,7 +13,7 @@ from infrastructure.database.setup import (
 )
 
 # Import routers
-from routers.upload_router import router as upload_router
+from routers.document_router import router as document_router
 from routers.query_router import router as query_router
 
 @asynccontextmanager
@@ -52,7 +52,7 @@ app.add_middleware(
 )
 
 # Include routers
-app.include_router(upload_router, prefix="/api", tags=["Upload"])
+app.include_router(document_router, prefix="/api", tags=["Document"])
 app.include_router(query_router, prefix="/api", tags=["Query"])
 
 # Health check
