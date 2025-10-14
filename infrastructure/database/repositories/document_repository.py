@@ -11,11 +11,23 @@ class DocumentRepository:
         self.db = db
         self.context = context
     
-    async def create_document(self, doc_name: str, content: str, doc_size: int, doc_type: str) -> Document:
+    async def create_document(
+        self,
+        doc_name: str,
+        *,
+        content: str | None = None,
+        context: str | None = None,
+        doc_size: int,
+        doc_type: str,
+    ) -> Document:
         """Create a new document record"""
+        body = context if context is not None else content
+        if body is None:
+            raise ValueError("Either 'content' or 'context' must be provided")
         new_document = Document(
             doc_name=doc_name,
-            content=content,
+            context=body,
+            content=body,
             doc_size=doc_size,
             doc_type=doc_type,
             tenant_id=self.context.tenant_id,
@@ -37,7 +49,7 @@ class DocumentRepository:
         if document:
             for key, value in kwargs.items():
                 setattr(document, key, value)
-            await self.db.commit()
+            await self.db.flush()
             return document
         raise ValueError(f"Document with ID {doc_id} not found.")
     
@@ -71,6 +83,6 @@ class DocumentRepository:
         document = result.scalar_one_or_none()
         if document:
             await self.db.delete(document)
-            await self.db.commit()
+            await self.db.flush()
             return True
         return False

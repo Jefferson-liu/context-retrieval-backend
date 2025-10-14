@@ -1,10 +1,9 @@
-import json
-
 import logging
 
-from infrastructure.ai.user_intent import QueryReasoner
-from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder, PromptTemplate
+from infrastructure.ai.user_intent import SubquestionDecomposer
+from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder, PromptTemplate, HumanMessagePromptTemplate
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
+from langchain_core.runnables import RunnableLambda
 from langchain_core.language_models import BaseChatModel
 from infrastructure.ai.tools import create_toolset
 from typing import Any, Dict, List, Optional
@@ -14,6 +13,7 @@ from infrastructure.database.repositories import ChunkRepository, DocumentReposi
 from sqlalchemy.ext.asyncio import AsyncSession
 from infrastructure.context import ContextScope
 from services.search.search_service import SearchService
+import json
 
 logger = logging.getLogger(__name__)
 
@@ -48,65 +48,59 @@ class ClauseFormat(BaseModel):
 class ClauseFormer:
     def __init__(self, llm: BaseChatModel, db: AsyncSession, context: ContextScope):
         self.llm = llm
-        self.query_reasoner = QueryReasoner(llm)
+        self.subquestion_decomposer = SubquestionDecomposer(llm)
         self.tools = create_toolset(db, context)
         self.chunk_repo = ChunkRepository(db, context)
         self.doc_repo = DocumentRepository(db, context)
         self.search_service = SearchService(db, context)
 
     async def form_clause(self, subquestion: str) -> ClauseFormat:
-        results = await self.search_service.semantic_search(subquestion)
-        context = [{
-            "chunk_id": result.chunk_id,
-            "doc_id": result.doc_id,
-            "content": result.context + "\n\n" + result.content,
-        } for result in results]
-
+        print(subquestion)
+        search_tool = self.tools["search_chunks"]
+        
+        async def call_tool_and_format(input_dict):
+            subquestion = input_dict["subquestion"]
+            tool_result = await search_tool.ainvoke({"query": subquestion})
+            context = json.loads(tool_result)
+            return {
+                "context": context,
+                "subquestion": subquestion
+            }
+        
+        tool_chain = RunnableLambda(call_tool_and_format)
+        prompt_template = "Based on this context\n\n{context}\n\nAnswer this question:\n\nquestion: {subquestion}"
         prompt = ChatPromptTemplate.from_messages([
             SystemMessage(
                 content=(
-                    "You are an expert at answering questions using the context provided to you.\n\n"
+                    "You are an expert at answering questions using the context provided to you through the search results.\n\n"
                     "Use the context to answer the question as accurately as you can. "
-                    "Cite your sources using (doc_id, chunk_id)."
                     "Do not make up an answer. "
                     "Return once you can answer with cited sources. No need for excessive detail. No need for background information or context."
                     "Only use the information provided in the context"
-                    "If you can't find the answer or the context is unusable, say 'I don't know' and do not cite any sources."
+                    "If you can't find the answer or the context is unusable, say 'I don't know' and do not cite any sources and do not explain why you don't know."
                 )
             ),
-            MessagesPlaceholder(variable_name="messages"),
-            HumanMessage(
-                content=(
-                    "Based on this context\n\n"
-                    f"{context}"
-                    "Answer this question:\n\n"
-                    f"question: {subquestion}"
-                )
-            ),
+            HumanMessagePromptTemplate.from_template(prompt_template),
         ])
         clause_llm = self.llm.with_structured_output(ClauseFormat)
-        chain = prompt | clause_llm
-        response: ClauseFormat = await chain.ainvoke({"messages": []})
-        print("Response:", response)
-        print("Content sources:", context)
-        #If there are no response sources OR a source in the response don't exist in context
-        content_sources = [ {"doc_id": src["doc_id"], "chunk_id": src["chunk_id"]} for src in context]
+        full_chain = tool_chain | prompt | clause_llm
+        message_chain = tool_chain | prompt
+        messages = await message_chain.ainvoke({"subquestion": subquestion})
+        print("Input to Anthropic LLM:")
+        print("Messages object:", messages)
+        response: ClauseFormat = await full_chain.ainvoke({"subquestion": subquestion})
+        print("Clause response:", response)
         if not response or not response.sources:
-            valid_sources = [
-                s for s in response.sources
-                if any(s.doc_id == src["doc_id"] and s.chunk_id == src["chunk_id"] for src in content_sources)
-            ]
-            if not valid_sources:
-                return None
             return None
         return response
-    
+
 
     async def get_response(self, message_history: List[BaseMessage], user_query: str) -> List[Clause]:
-        topics = await self.query_reasoner.get_required_subquestions(message_history, user_query)
+        topics = await self.subquestion_decomposer.get_required_subquestions(message_history, user_query)
         all_clauses = []
         for topic in topics:
             clause: ClauseFormat = await self.form_clause(topic)
             if clause and clause.sources:
+                print("Formed clause:", clause)
                 all_clauses.append(await clause.to_clause(self.chunk_repo, self.doc_repo))
         return all_clauses

@@ -23,7 +23,7 @@ async def submit_query(
         return {
             "query": query_text,
             "response": result["response"],
-            "sources": result["sources"]
+            "clauses": result["clauses"]
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Query processing failed: {str(e)}")

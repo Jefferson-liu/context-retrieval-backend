@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Text, DateTime, ForeignKey, UniqueConstraint
+from sqlalchemy import Column, Integer, String, Text, DateTime, ForeignKey
 from sqlalchemy.orm import relationship
 from datetime import datetime
 from pgvector.sqlalchemy import Vector
@@ -12,6 +12,7 @@ class Document(Base):
     __tablename__ = 'documents'
     id = Column(Integer, primary_key=True, index=True)
     doc_name = Column(String, index=True)
+    context = Column(Text)
     content = Column(Text)
     doc_size = Column(Integer)
     upload_date = Column(DateTime, default=datetime.now())
@@ -58,3 +59,7 @@ class Embedding(Base):
     chunk = relationship("Chunk", back_populates="embedding", uselist=False)
     tenant = relationship(Tenant)
     project = relationship(Project)
+
+
+# Backwards-compatible alias expected by legacy code and tests
+UploadedDocument = Document

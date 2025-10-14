@@ -16,6 +16,9 @@ SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine, clas
 # Base for models
 Base = declarative_base()
 
+# Ensure all model modules register with Base metadata
+from infrastructure.database import models as _models  # noqa: E402,F401
+
 async def get_db():
     db = SessionLocal()
     try:

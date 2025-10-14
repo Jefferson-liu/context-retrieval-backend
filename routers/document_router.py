@@ -1,8 +1,10 @@
 from fastapi import APIRouter, UploadFile, File, Depends, HTTPException
 from services.document.processing import DocumentProcessingService
+from services.document.chunk_editing import ChunkEditingService
 from services.document.retrieval import DocumentRetrievalService
 from infrastructure.context import RequestContextBundle
 from routers.dependencies import get_request_context_bundle
+from schemas.requests import EditDocumentRequest, EditChunkRequest
 
 router = APIRouter()
 
@@ -63,6 +65,23 @@ async def get_document(doc_id: int, context_bundle: RequestContextBundle = Depen
         "upload_date": doc.upload_date
     }
 
+@router.put("/documents/{doc_id}", summary="Update an existing document")
+async def edit_document(
+    doc_id: int,
+    payload: EditDocumentRequest,
+    context_bundle: RequestContextBundle = Depends(get_request_context_bundle),
+):
+    service = DocumentProcessingService(context_bundle.db, context_bundle.scope)
+    updated = await service.update_document(
+        document_id=doc_id,
+        context=payload.content,
+        doc_type=payload.doc_type,
+        commit_message=payload.commit_message,
+    )
+    if not updated:
+        raise HTTPException(status_code=404, detail="Document not found")
+    return {"message": "Document updated successfully", "doc_id": doc_id}
+
 @router.delete("/documents/{doc_id}", summary="Delete a document")
 async def delete_document(doc_id: int, context_bundle: RequestContextBundle = Depends(get_request_context_bundle)):
     """
@@ -73,3 +92,31 @@ async def delete_document(doc_id: int, context_bundle: RequestContextBundle = De
     if not success:
         raise HTTPException(status_code=404, detail="Document not found")
     return {"message": "Document deleted successfully"}
+
+
+@router.put(
+    "/documents/{doc_id}/chunks/{chunk_id}",
+    summary="Update a document chunk",
+)
+async def edit_chunk(
+    doc_id: int,
+    chunk_id: int,
+    payload: EditChunkRequest,
+    context_bundle: RequestContextBundle = Depends(get_request_context_bundle),
+):
+    service = ChunkEditingService(context_bundle.db, context_bundle.scope)
+    chunk = await service.update_chunk(
+        doc_id,
+        chunk_id,
+        content=payload.content,
+        context_override=payload.context,
+    )
+    if not chunk:
+        raise HTTPException(status_code=404, detail="Chunk not found for document")
+
+    return {
+        "chunk_id": chunk.id,
+        "doc_id": chunk.doc_id,
+        "content": chunk.content,
+        "context": chunk.context,
+    }

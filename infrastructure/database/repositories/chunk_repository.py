@@ -40,11 +40,15 @@ class ChunkRepository:
         return new_embedding
     
     async def get_chunks_by_doc_id(self, doc_id: int) -> List[Chunk]:
-        """Get all chunks associated with a specific document ID"""
-        stmt = select(Chunk).where(
-            Chunk.doc_id == doc_id,
-            Chunk.tenant_id == self.context.tenant_id,
-            Chunk.project_id.in_(self.context.project_ids),
+        """Get all chunks associated with a specific document ID ordered by chunk order."""
+        stmt = (
+            select(Chunk)
+            .where(
+                Chunk.doc_id == doc_id,
+                Chunk.tenant_id == self.context.tenant_id,
+                Chunk.project_id.in_(self.context.project_ids),
+            )
+            .order_by(Chunk.chunk_order.asc(), Chunk.id.asc())
         )
         result = await self.db.execute(stmt)
         return result.scalars().all()
@@ -59,19 +63,24 @@ class ChunkRepository:
         result = await self.db.execute(stmt)
         return [row[0] for row in result.all()]
     
-    async def edit_chunk(self, chunk_id: int, **kwargs) -> Optional[Chunk]:
-        """Edit an existing chunk record"""
+    async def get_chunk_by_id(self, chunk_id: int) -> Optional[Chunk]:
+        """Fetch a single chunk scoped to the current tenant/projects."""
         stmt = select(Chunk).where(
             Chunk.id == chunk_id,
             Chunk.tenant_id == self.context.tenant_id,
             Chunk.project_id.in_(self.context.project_ids),
         )
         result = await self.db.execute(stmt)
-        chunk = result.scalar_one_or_none()
+        return result.scalar_one_or_none()
+
+    async def edit_chunk(self, chunk_id: int, **kwargs) -> Optional[Chunk]:
+        """Edit an existing chunk record"""
+        chunk = await self.get_chunk_by_id(chunk_id)
         if chunk:
             for key, value in kwargs.items():
                 if hasattr(chunk, key):
                     setattr(chunk, key, value)
+            await self.db.flush()
         return chunk
 
     async def update_embedding(self, chunk_id: int, **kwargs) -> Optional[Embedding]:
@@ -122,7 +131,7 @@ class ChunkRepository:
         chunk = result.scalar_one_or_none()
         if chunk:
             await self.db.delete(chunk)
-            await self.db.commit()
+            await self.db.flush()
             return True
         return False
     
@@ -138,7 +147,7 @@ class ChunkRepository:
         count = len(chunks)
         for chunk in chunks:
             await self.db.delete(chunk)
-        await self.db.commit()
+        await self.db.flush()
         return count
     
     

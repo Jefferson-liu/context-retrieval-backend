@@ -12,16 +12,18 @@ class QuerySubquestions(BaseModel):
 class CoverageResult(BaseModel):
     covers_all_subquestions: bool
 
-class QueryReasoner:
+class SubquestionDecomposer:
     def __init__(self, llm: BaseChatModel):
         self.llm = llm
 
     async def get_required_subquestions(self, message_history: List[BaseMessage], user_query: str)  -> List[str]:
         system = (
-        "You break queries into only the NECESSARY subquestions.\n"
-        "If the user's query is already atomic (answerable as a single fact or step), "
-        "return the user's query as the only subquestion.\n"
-        "Otherwise, return 2 to 6 subquestions, each one sentence and single-aspect."
+            "You are an expert at generating queries for a vector search system.\n"
+            "You break queries into only the NECESSARY subqueries.\n"
+            "If the user's query is already atomic (answerable as a single fact or step), "
+            "return the user's query as the only subquery.\n"
+            "Vector search works best when matching relevant words, so avoid overly broad or vague subqueries.\n"
+            "Otherwise, return 2 to 6 subquestions, each one sentence and single-aspect."
         )
 
         prompt = ChatPromptTemplate.from_messages([
@@ -32,10 +34,13 @@ class QueryReasoner:
             "Schema: {\"subquestions\": string[]}\n\n"
             f"User query: {user_query}\n\n"
             "Examples:\n"
-            "- Input: \"who's the designer at TrackRec?\" → {\"subquestions\": [\"who's the designer at TrackRec?\"]}\n"
-            "- Input: \"What are the aspects that make up the business?\" → "
-            "{\"subquestions\": [\"What is the product?\", \"Who are the customers?\", "
-            "\"What is the revenue model?\", \"What differentiates it?\"]}"
+            "- Input: \"who's the designer at TrackRec?\" → {\"subquestions\": [\"designer at TrackRec\"]}\n"
+            "- Input: \"What are the aspects that make up the business of TrackRec?\" → "
+            "{\"subquestions\": [\"TrackRec product\", \"TrackRec customers\", "
+            "\"TrackRec revenue model\", \"Business advantages\"]}",
+            "- Input: \"Who works at TrackRec?\" → "
+            "{\"subquestions\": [\"TrackRec employees\", \"TrackRec roles\", "
+            "\"TrackRec team structure\", \"TrackRec leadership\"]}"
         ))
         ])
         topic_llm = self.llm.with_structured_output(QuerySubquestions)

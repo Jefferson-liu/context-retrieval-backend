@@ -3,10 +3,11 @@ from infrastructure.context import ContextScope
 from infrastructure.database.repositories.query_repository import QueryRepository
 from schemas import Source, Clause
 from langchain_openai import ChatOpenAI
+from langchain_anthropic import ChatAnthropic
 from services.search.search_service import SearchService
-from infrastructure.ai.query_logic import QueryReasoner
+from infrastructure.ai.user_intent import SubquestionDecomposer
 from infrastructure.ai.embedding import Embedder
-from services.ai.query_reasoning import QueryReasoningEngine
+from services.ai.agentic_tools.clause_former import ClauseFormer
 from typing import Dict, Any
 
 from config import settings
@@ -18,10 +19,9 @@ class QueryService:
         self.db = db
         self.context = context
         self.query_repo = QueryRepository(db, context)
-        self.embedder = Embedder()
+        self.embedder = Embedder(ChatAnthropic(temperature=0, model_name="claude-3-5-sonnet-latest", api_key=settings.ANTHROPIC_API_KEY))
         self.search_service = SearchService(db, context)
-        self.query_reasoning_engine = QueryReasoningEngine(ChatOpenAI(temperature=0, model_name="gpt-5", api_key=settings.OPENAI_API_KEY), db, context)
-        self.query_reasoner = QueryReasoner(ChatOpenAI(temperature=0, model_name="gpt-5", api_key=settings.OPENAI_API_KEY))
+        self.clause_former = ClauseFormer(ChatAnthropic(temperature=0, model_name="claude-3-5-sonnet-latest", api_key=settings.ANTHROPIC_API_KEY), db, context)
     
     async def process_query(self, query_text: str) -> Dict[str, Any]:
         """Process a query: create query, search, generate response, store results."""
@@ -32,7 +32,7 @@ class QueryService:
         response = await self.query_repo.create_response(query.id)
         
         try:
-            response_clauses = await self.query_reasoning_engine.get_response(message_history=[], user_query=query_text)
+            response_clauses = await self.clause_former.get_response(message_history=[], user_query=query_text)
             
             response_text = "\n\n".join([clause.statement for clause in response_clauses])
             
@@ -60,12 +60,17 @@ class QueryService:
             return {
                 "query_id": query.id,
                 "response": response_text,
-                "sources": [
+                "clauses": [
                     {
-                        "chunk_id": r.chunk_id,
-                        "doc_name": r.doc_name,
-                        "snippet": r.content
-                    } for r in all_sources
+                        "statement": clause.statement,
+                        "sources": [
+                            {
+                                "chunk_id": source.chunk_id,
+                                "doc_id": source.doc_id,
+                                "snippet": source.content
+                            } for source in clause.sources
+                        ]
+                    } for clause in response_clauses
                 ]
             }
         except Exception as e:

@@ -3,15 +3,16 @@ from typing import List
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langchain_openai import ChatOpenAI
+from langchain_core.language_models.chat_models import BaseChatModel
 from sentence_transformers import SentenceTransformer
 
 from config import settings
 from infrastructure.utils.prompt_loader import load_prompt
 
 class Embedder:
-    def __init__(self):
+    def __init__(self, llm: BaseChatModel):
         self.embedding_model = SentenceTransformer('BAAI/llm-embedder')
-        self.llm = ChatOpenAI(temperature=0, model_name="gpt-4", api_key=settings.OPENAI_API_KEY)
+        self.llm = llm
 
     async def contextualize_chunk_content(self, chunk_content: str, full_content: str) -> str:
         """Add contextual information to a single chunk for better search retrieval"""

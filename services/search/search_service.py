@@ -2,13 +2,15 @@ from infrastructure.database.repositories.vector_search_repository import Search
 from infrastructure.ai.embedding import Embedder
 from sqlalchemy.ext.asyncio import AsyncSession
 from schemas import VectorSearchResult
+from langchain_anthropic import ChatAnthropic
+from config import settings
 
 class SearchService:
     def __init__(self, db: AsyncSession, context):
         self.db = db
         self.context = context
         self.search_repo = SearchRepository(db, context)
-        self.embedder = Embedder()
+        self.embedder = Embedder(ChatAnthropic(temperature=0, model_name="claude-3-5-sonnet-latest", api_key=settings.ANTHROPIC_API_KEY))
 
     async def semantic_search(self, query_text: str, top_k: int = 5) -> list[VectorSearchResult]:
         """Perform semantic search for the given query text."""

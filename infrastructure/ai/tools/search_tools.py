@@ -1,6 +1,6 @@
 import json
 
-from langchain.tools import tool
+from langchain_core.tools import tool
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from infrastructure.context import ContextScope
@@ -52,5 +52,9 @@ def create_toolset(db: AsyncSession, context: ContextScope):
         ]
         return json.dumps(payload)
 
-    return [search_chunks, list_documents, get_document_chunks]
+    return {
+        "search_chunks": search_chunks,
+        "list_documents": list_documents,
+        "get_document_chunks": get_document_chunks,
+    }
 

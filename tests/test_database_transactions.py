@@ -13,7 +13,7 @@ from sqlalchemy import text
 
 from infrastructure.database.database import create_tables, drop_tables, get_db, engine
 from infrastructure.context import ContextScope
-from infrastructure.database.models.documents import UploadedDocument
+from infrastructure.database.models.documents import Document
 from infrastructure.database.models.tenancy import Tenant, Project
 from infrastructure.database.repositories import DocumentRepository, ChunkRepository, QueryRepository
 from infrastructure.database.setup import (
@@ -61,7 +61,7 @@ def test_get_db_commits_documents():
             )
 
             session.add(
-                UploadedDocument(
+                Document(
                     doc_name=doc_name,
                     context="test content",
                     doc_size=len("test content"),
@@ -90,7 +90,7 @@ def test_get_db_commits_documents():
             )
 
             result = await verify_session.execute(
-                select(UploadedDocument).where(UploadedDocument.doc_name == doc_name)
+                select(Document).where(Document.doc_name == doc_name)
             )
             saved_doc = result.scalar_one_or_none()
             assert saved_doc is not None
@@ -118,7 +118,7 @@ def test_sources_retain_history_when_document_deleted():
                 "queries",
                 "embeddings",
                 "chunks",
-                "uploaded_documents",
+                "documents",
             ):
                 await conn.execute(text(f"TRUNCATE {table_name} RESTART IDENTITY CASCADE"))
             await configure_multi_tenant_rls(conn)
@@ -146,7 +146,7 @@ def test_sources_retain_history_when_document_deleted():
             user_id = "history-tester"
 
             await session.execute(
-                text("SELECT set_app_context(:tenant_id, :project_ids)"),
+                text("SELECT set_app_content(:tenant_id, :project_ids)"),
                 {
                     "tenant_id": tenant_id,
                     "project_ids": str(project_id),

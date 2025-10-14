@@ -36,6 +36,9 @@ async def configure_multi_tenant_rls(conn: AsyncConnection) -> None:
         "queries",
         "responses",
         "sources",
+        "knowledge_entities",
+        "knowledge_relationships",
+        "knowledge_relationship_metadata",
     ]
 
     for table in tables:
