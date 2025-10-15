@@ -61,48 +61,45 @@ class ChunkEditingService:
 
     async def update_chunk(
         self,
-        doc_id: int,
         chunk_id: int,
         *,
         content: Optional[str] = None,
     ) -> Optional[Chunk]:
         """Update the chunk and refresh its embedding."""
         chunk = await self.chunk_repository.get_chunk_by_id(chunk_id)
-        if not chunk or chunk.doc_id != doc_id:
+        if not chunk:
             return None
+        
+        doc_id = chunk.doc_id
 
         document = await self.document_repository.get_document_by_id(doc_id)
-        document_text = document.content if document and document.content else ""
+        document_text = document.content
 
-        current_content = chunk.content or ""
-        current_context = chunk.context or ""
+        current_content = chunk.content
+        current_context = chunk.context
 
         new_content = content if content is not None else current_content
-        new_context: Optional[str]
+        new_context: Optional[str] = "temp context"
 
         doc_updated = False
         updated_doc_body = document_text
-        if document and content is not None:
-            span = self._locate_chunk_span(document_text, chunk)
-            if span:
-                start, end = span
-                updated_doc_body = document_text[:start] + new_content + document_text[end:]
+        
+        span = self._locate_chunk_span(document_text, chunk)
+        if span:
+            start, end = span
+            updated_doc_body = document_text[:start] + new_content + document_text[end:]
+            doc_updated = True
+        elif current_content:
+            replacement = document_text.replace(current_content, new_content, 1)
+            if replacement != document_text:
+                updated_doc_body = replacement
                 doc_updated = True
-            elif current_content:
-                replacement = document_text.replace(current_content, new_content, 1)
-                if replacement != document_text:
-                    updated_doc_body = replacement
-                    doc_updated = True
-
-        elif content is not None:
-            doc_for_context = updated_doc_body if doc_updated else document_text
-            if doc_for_context:
-                new_context = await self.embedder.contextualize_chunk_content(new_content, doc_for_context)
-            else:
-                new_context = current_context
         else:
             new_context = current_context
 
+        doc_for_context = updated_doc_body if doc_updated else document_text
+        new_context = await self.embedder.contextualize_chunk_content(new_content, doc_for_context)
+        
         await self.chunk_repository.edit_chunk(
             chunk_id,
             content=new_content,

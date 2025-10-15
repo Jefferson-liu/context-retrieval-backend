@@ -99,24 +99,20 @@ async def delete_document(doc_id: int, context_bundle: RequestContextBundle = De
     summary="Update a document chunk",
 )
 async def edit_chunk(
-    doc_id: int,
     chunk_id: int,
     payload: EditChunkRequest,
     context_bundle: RequestContextBundle = Depends(get_request_context_bundle),
 ):
     service = ChunkEditingService(context_bundle.db, context_bundle.scope)
     chunk = await service.update_chunk(
-        doc_id,
         chunk_id,
         content=payload.content,
-        context_override=payload.context,
     )
     if not chunk:
-        raise HTTPException(status_code=404, detail="Chunk not found for document")
+        raise HTTPException(status_code=404, detail="Chunk not found")
 
     return {
         "chunk_id": chunk.id,
-        "doc_id": chunk.doc_id,
         "content": chunk.content,
         "context": chunk.context,
     }
