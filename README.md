@@ -155,7 +155,7 @@ python main.py
 
 ---
 
-## Running Tests & Smoke Checks
+## Running Tests & Smoke Checks (Tests aren't up to date)
 
 ```powershell
 .venv\Scripts\activate
