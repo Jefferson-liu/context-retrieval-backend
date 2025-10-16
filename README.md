@@ -19,7 +19,8 @@ A multi-tenant Retrieval-Augmented Generation (RAG) service built with FastAPI, 
 
 - Python **3.11+**
 - PostgreSQL 14+ (with `pgvector` extension available)
-- (Optional) Milvus 2.3+ if using `VECTOR_STORE_MODE=milvus`
+- Install milvus using the docker compose:
+     https://milvus.io/docs/install_standalone-docker-compose.md
 - Valid Anthropic API key for LLM-driven summarization and query flows (`claude-3-5-haiku-latest`)
 - Git installed when using the document versioning feature
 
