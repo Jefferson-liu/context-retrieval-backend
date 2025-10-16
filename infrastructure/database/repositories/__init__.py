@@ -3,6 +3,11 @@ from .chunk_repository import ChunkRepository
 from .query_repository import QueryRepository
 from .vector_search_repository import SearchRepository
 from .pgvector_search_repository import SearchRepository as PGVectorSearchRepository
+from .knowledge_repository import (
+    KnowledgeEntityRepository,
+    KnowledgeRelationshipRepository,
+    KnowledgeRelationshipMetadataRepository,
+)
 
 __all__ = [
     "DocumentRepository",
@@ -10,4 +15,7 @@ __all__ = [
     "QueryRepository",
     "SearchRepository",
     "PGVectorSearchRepository",
+    "KnowledgeEntityRepository",
+    "KnowledgeRelationshipRepository",
+    "KnowledgeRelationshipMetadataRepository",
 ]

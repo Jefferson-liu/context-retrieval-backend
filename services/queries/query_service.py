@@ -4,13 +4,12 @@ from infrastructure.database.repositories.query_repository import QueryRepositor
 from schemas import Source, Clause
 from langchain_openai import ChatOpenAI
 from langchain_anthropic import ChatAnthropic
-from services.search.search_service import SearchService
-from infrastructure.ai.user_intent import SubquestionDecomposer
-from infrastructure.ai.embedding import Embedder
 from services.ai.agentic_tools.clause_former import ClauseFormer
 from typing import Dict, Any
 
 from config import settings
+
+chatmodel = ChatAnthropic(temperature=0, model_name="claude-3-5-haiku-latest", api_key=settings.ANTHROPIC_API_KEY)
 
 class QueryService:
     """Service for processing user queries, performing searches, and generating responses."""
@@ -19,10 +18,8 @@ class QueryService:
         self.db = db
         self.context = context
         self.query_repo = QueryRepository(db, context)
-        self.embedder = Embedder(ChatAnthropic(temperature=0, model_name="claude-3-5-sonnet-latest", api_key=settings.ANTHROPIC_API_KEY))
-        self.search_service = SearchService(db, context)
-        self.clause_former = ClauseFormer(ChatAnthropic(temperature=0, model_name="claude-3-5-sonnet-latest", api_key=settings.ANTHROPIC_API_KEY), db, context)
-    
+        self.clause_former = ClauseFormer(chatmodel, db, context)
+
     async def process_query(self, query_text: str) -> Dict[str, Any]:
         """Process a query: create query, search, generate response, store results."""
         # Create query record

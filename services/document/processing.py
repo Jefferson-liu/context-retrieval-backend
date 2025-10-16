@@ -11,6 +11,11 @@ from services.file import DocumentFileService
 from infrastructure.vector_store import VectorRecord, create_vector_store
 from langchain_anthropic import ChatAnthropic
 from config import settings
+from services.knowledge import KnowledgeGraphService
+
+
+claude_haiku = ChatAnthropic(temperature=0, model_name="claude-3-5-haiku-latest", api_key=settings.ANTHROPIC_API_KEY)
+
 
 class DocumentProcessingService:
     def __init__(self, db: AsyncSession, context: ContextScope):
@@ -19,10 +24,11 @@ class DocumentProcessingService:
         self.document_repository = DocumentRepository(db, context)
         self.chunk_repository = ChunkRepository(db, context)
         self.chunker = Chunker()
-        self.embedder = Embedder(ChatAnthropic(temperature=0, model_name="claude-3-5-haiku-latest", api_key=settings.ANTHROPIC_API_KEY))
+        self.embedder = Embedder(claude_haiku)
         self.git_service = GitService()
         self.document_file_service = DocumentFileService()
         self.vector_store = create_vector_store(db)
+        self.knowledge_service = KnowledgeGraphService(db, context, llm=claude_haiku)
         
         
     async def upload_and_process_document(
@@ -41,7 +47,7 @@ class DocumentProcessingService:
         doc_id = db_document.id
 
         # Step 2: Process the document (chunk and embed)
-        await self.process_document(doc_id, content)
+        await self.process_document(doc_id, content, doc_name=doc_name)
 
         file_path = await self.document_file_service.write_document(doc_id, doc_name, content)
         if file_path:
@@ -51,12 +57,17 @@ class DocumentProcessingService:
         # FastAPI will automatically commit the transaction on successful response
         return doc_id
 
-    async def process_document(self, document_id: int, content: str):
+    async def process_document(self, document_id: int, content: str, doc_name: str | None = None):
         """Process a document: create chunks and embeddings."""
         # Chunk the content
         chunks = await self.chunker.chunk_text(content)
 
         if not chunks:
+            await self.knowledge_service.refresh_document_knowledge(
+                document_id,
+                doc_name or "",
+                content,
+            )
             return
 
         parallelism = max(1, min(4, len(chunks)))
@@ -99,6 +110,11 @@ class DocumentProcessingService:
         records = await asyncio.gather(*(build_vector_record(chunk_obj) for chunk_obj in chunk_objects))
 
         await self.vector_store.upsert_vectors(records)
+        await self.knowledge_service.refresh_document_knowledge(
+            document_id,
+            doc_name or "",
+            content,
+        )
 
     async def update_document(
         self,
@@ -127,7 +143,7 @@ class DocumentProcessingService:
                 tenant_id=self.context.tenant_id,
             )
         await self.chunk_repository.delete_chunks_by_doc_id(document_id)
-        await self.process_document(document_id, context)
+        await self.process_document(document_id, context, doc_name=doc_name)
 
         file_path = await self.document_file_service.write_document(document_id, doc_name, context)
         if file_path:

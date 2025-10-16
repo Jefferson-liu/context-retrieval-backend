@@ -10,7 +10,7 @@ from config import settings
 from infrastructure.utils.prompt_loader import load_prompt
 
 class Embedder:
-    def __init__(self, llm: BaseChatModel):
+    def __init__(self, llm: BaseChatModel = None):
         self.embedding_model = SentenceTransformer('BAAI/llm-embedder')
         self.llm = llm
 

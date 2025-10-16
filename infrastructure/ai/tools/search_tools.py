@@ -5,12 +5,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from infrastructure.context import ContextScope
 from services.search.search_service import SearchService
+from infrastructure.ai.embedding import Embedder
 from services.document.retrieval import DocumentRetrievalService
 
 
 def create_toolset(db: AsyncSession, context: ContextScope):
     """Instantiate search/document tools bound to the given database session/context."""
-    search_service = SearchService(db, context)
+    search_service = SearchService(db, context, embedder=Embedder())
     document_service = DocumentRetrievalService(db, context)
 
     @tool("search_chunks", return_direct=False)

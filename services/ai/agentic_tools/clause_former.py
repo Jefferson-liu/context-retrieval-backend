@@ -12,6 +12,7 @@ from schemas import Clause, Source
 from infrastructure.database.repositories import ChunkRepository, DocumentRepository
 from sqlalchemy.ext.asyncio import AsyncSession
 from infrastructure.context import ContextScope
+from infrastructure.ai.embedding import Embedder
 from services.search.search_service import SearchService
 import json
 
@@ -52,7 +53,7 @@ class ClauseFormer:
         self.tools = create_toolset(db, context)
         self.chunk_repo = ChunkRepository(db, context)
         self.doc_repo = DocumentRepository(db, context)
-        self.search_service = SearchService(db, context)
+        self.search_service = SearchService(db, context, Embedder())
 
     async def form_clause(self, subquestion: str) -> ClauseFormat:
         print(subquestion)
