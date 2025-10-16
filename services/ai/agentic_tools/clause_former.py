@@ -55,22 +55,25 @@ class ClauseFormer:
         self.doc_repo = DocumentRepository(db, context)
         self.search_service = SearchService(db, context, Embedder())
 
-    async def form_clause(self, subquestion: str) -> ClauseFormat:
+    async def form_clause(self, subquestion: str, message_history: List[BaseMessage]) -> ClauseFormat:
         print(subquestion)
         search_tool = self.tools["search_chunks"]
         
         async def call_tool_and_format(input_dict):
             subquestion = input_dict["subquestion"]
+            history = input_dict["message_history"]
             tool_result = await search_tool.ainvoke({"query": subquestion})
             context = json.loads(tool_result)
             return {
                 "context": context,
-                "subquestion": subquestion
+                "subquestion": subquestion,
+                "message_history": history,
             }
         
         tool_chain = RunnableLambda(call_tool_and_format)
         prompt_template = "Based on this context\n\n{context}\n\nAnswer this question:\n\nquestion: {subquestion}"
         prompt = ChatPromptTemplate.from_messages([
+            MessagesPlaceholder(variable_name="message_history"),
             SystemMessage(
                 content=(
                     "You are an expert at answering questions using the context provided to you through the search results.\n\n"
@@ -86,10 +89,10 @@ class ClauseFormer:
         clause_llm = self.llm.with_structured_output(ClauseFormat)
         full_chain = tool_chain | prompt | clause_llm
         message_chain = tool_chain | prompt
-        messages = await message_chain.ainvoke({"subquestion": subquestion})
+        messages = await message_chain.ainvoke({"subquestion": subquestion, "message_history": message_history})
         print("Input to Anthropic LLM:")
         print("Messages object:", messages)
-        response: ClauseFormat = await full_chain.ainvoke({"subquestion": subquestion})
+        response: ClauseFormat = await full_chain.ainvoke({"subquestion": subquestion, "message_history": message_history})
         print("Clause response:", response)
         if not response or not response.sources:
             return None
@@ -100,7 +103,7 @@ class ClauseFormer:
         topics = await self.subquestion_decomposer.get_required_subquestions(message_history, user_query)
         all_clauses = []
         for topic in topics:
-            clause: ClauseFormat = await self.form_clause(topic)
+            clause: ClauseFormat = await self.form_clause(topic, message_history)
             if clause and clause.sources:
                 print("Formed clause:", clause)
                 all_clauses.append(await clause.to_clause(self.chunk_repo, self.doc_repo))

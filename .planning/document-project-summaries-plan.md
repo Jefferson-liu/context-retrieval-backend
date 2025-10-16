@@ -75,18 +75,6 @@ Constraints:
   - After document summary refresh (debounced queue or scheduled worker).
   - Manual admin endpoint (future) for re-run.
 
-### Summary Refresh Strategy & Cost Controls
-- Maintain `summary_hash` derived from a stable text normalization of the document body; reuse it to short-circuit regeneration when content is unchanged.
-- Track `content_signature` per chunk (e.g., SHA256) and store in an auxiliary column or existing chunk metadata so the processing pipeline can detect which chunks actually changed.
-- Regeneration algorithm:
-  1. Re-chunk a document edit as usual.
-  2. Compare new chunk signatures to persisted ones; only run LLM summarization on the changed chunks and synthesize a delta summary.
-  3. For small deltas, update the existing document summary by invoking a lightweight "patch summary" prompt that receives the current summary plus the changed snippets.
-  4. If the changed content exceeds a configurable threshold (e.g., >30% of chunks modified), fall back to full document re-summarization.
-- To further decrease LLM usage, introduce cached "micro-summaries" per chunk stored alongside chunk metadata. Document-level summarization then becomes an aggregation of chunk summaries via a deterministic reducer prompt.
-- Schedule low-priority/background recomputation (e.g., nightly) to reconcile incremental updates with a fresh full summary to mitigate drift.
-- When regeneration is skipped, still update `updated_at` and provenance fields so downstream systems know the summary is current relative to the document version.
-
 ### Vector Store Integration
 - Extend `infrastructure/vector_store/factory.py` to expose Milvus-backed gateways for summary collections:
   - `create_vector_store` remains for chunk embeddings (pgvector/Milvus depending on config).
@@ -100,14 +88,6 @@ Constraints:
   - `ProjectSummaryRepository` managing project-level records.
 - Repositories must set tenant/project context via `ContextScope`.
 
-## Migrations
-- Add Alembic migration creating the two new summary tables with supporting indexes:
-  - `document_summaries`: unique constraint on `document_id`, index on `(tenant_id, project_id, document_id)`, optional index on `milvus_primary_key`.
-  - `project_summaries`: unique constraint on `(tenant_id, project_id)`, optional index on `milvus_primary_key`.
-- Update RLS policies to include the new tables (mirroring `documents` policy).
-- Capture Milvus primary key assignment rules in migration notes (either reuse Postgres id or sequence dedicated column).
-- No relational storage for embeddings; Milvus collections provisioned via startup hook or migration script invoking `ensure_collection`.
-
 ## Testing Strategy
 - Unit tests for repositories verifying tenant scoping and unique constraints.
 - Integration tests for `DocumentProcessingService` to confirm summary records are created and Milvus upserts are invoked (mock Milvus gateway + embedder).
@@ -116,8 +96,8 @@ Constraints:
 
 ## Observability & Operations
 - Log summary generation latency and token counts.
-- Add metrics counters for summary refresh successes/failures and Milvus write/search latency.
-- Plan background job resiliency (retry queue, dead-letter) and Milvus collection health checks (index state, row counts).
+- Add metrics counters for summary refresh successes/failures.
+- Plan background job resiliency (retry queue, dead-letter).
 
 ## Open Questions
 1. Should we store multiple summary revisions or overwrite in place? (Plan assumes overwrite with `summary_hash` to skip redundant writes.)

@@ -30,7 +30,7 @@ async def configure_multi_tenant_rls(conn: AsyncConnection) -> None:
     )
 
     tables = [
-        "uploaded_documents",
+        "documents",
         "chunks",
         "embeddings",
         "queries",
@@ -39,6 +39,8 @@ async def configure_multi_tenant_rls(conn: AsyncConnection) -> None:
         "knowledge_entities",
         "knowledge_relationships",
         "knowledge_relationship_metadata",
+        "document_summaries",
+        "project_summaries",
     ]
 
     for table in tables:

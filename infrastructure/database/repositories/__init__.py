@@ -8,6 +8,8 @@ from .knowledge_repository import (
     KnowledgeRelationshipRepository,
     KnowledgeRelationshipMetadataRepository,
 )
+from .document_summary_repository import DocumentSummaryRepository
+from .project_summary_repository import ProjectSummaryRepository
 
 __all__ = [
     "DocumentRepository",
@@ -18,4 +20,6 @@ __all__ = [
     "KnowledgeEntityRepository",
     "KnowledgeRelationshipRepository",
     "KnowledgeRelationshipMetadataRepository",
+    "DocumentSummaryRepository",
+    "ProjectSummaryRepository",
 ]

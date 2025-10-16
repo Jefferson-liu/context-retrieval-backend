@@ -1,77 +1,205 @@
 # Context Retrieval Backend
 
-A FastAPI-based retrieval augmented generation backend that ingests documents, builds semantic indexes, and answers queries across multi-tenant projects.
+A multi-tenant Retrieval-Augmented Generation (RAG) service built with FastAPI, async SQLAlchemy, LangChain, and SentenceTransformers. It ingests documents, creates chunk-level and document/project summaries, stores embeddings in pgvector or Milvus, and answers natural-language questions with sourced responses.
 
-## Current Capabilities
-- **Application lifecycle:** `main.py` enables the `pgvector` extension, auto-creates tables, configures row-level security for multi-tenant access, and seeds a default tenant/project during startup.
-- **Scope-aware request handling:** every request resolves a `ContextScope` (tenant, project list, user) and registers it with PostgreSQL through `set_app_context` to enforce data isolation.
-- **Document ingestion API:** `/api/upload` accepts `.txt` and `.md` uploads, persists the raw document, splits it with markdown-aware chunking, contextualizes each chunk with an LLM prompt, embeds the content, and upserts vectors into the configured store.
-- **Document management:** `/api/documents` supports listing, fetching, and deleting stored documents while keeping vector indexes and on-disk copies in sync.
-- **Query answering:** `/api/query` records each query, embeds the prompt, performs top-k semantic search per tenant/project, calls the configured LLM to synthesize an answer, and stores response plus source snippets.
-- **Vector store abstraction:** adapters for both PostgreSQL `pgvector` and Milvus are wired through a common gateway so the same code path handles ingestion and search for either backend.
-- **Embedding & LLM integrations:** SentenceTransformer `BAAI/llm-embedder` powers embeddings; LLM provider selection is centralized via `config.settings` and supports OpenAI or Anthropic clients.
-- **Version-controlled artifacts:** when `GIT_REPO_PATH` is set, uploaded or deleted documents are mirrored to disk and committed through a pygit2-backed `GitService`.
+---
 
-## API Surface (implemented)
-| Method | Path | Summary |
+## At a Glance
+
+- **API surface:** ingest, manage, and delete documents; submit queries; retrieve responses and supporting sources.
+- **Multi-tenancy:** every request runs with a `ContextScope` (tenant + project list + user) enforced by PostgreSQL row-level security.
+- **Vector stores:** pluggable adapter for pgvector or Milvus; same ingestion/search code path works for both.
+- **Summaries:** document-level summaries are generated and stored in PostgreSQL and Milvus (when configured); project summaries aggregate document summaries to provide high-level context.
+- **Version control:** optional git integration mirrors uploaded documents to disk and commits them.
+- **Reset utilities:** `scripts/reset_state.py` drops/recreates tables, reconfigures RLS, clears summaries, purges Milvus collections, and deletes on-disk document artifacts.
+
+---
+
+## Prerequisites
+
+- Python **3.11+**
+- PostgreSQL 14+ (with `pgvector` extension available)
+- (Optional) Milvus 2.3+ if using `VECTOR_STORE_MODE=milvus`
+- Valid Anthropic API key for LLM-driven summarization and query flows (`claude-3-5-haiku-latest`)
+- Git installed when using the document versioning feature
+
+> **Note:** SentenceTransformers downloads the `BAAI/llm-embedder` model at runtime; ensure the host can reach Hugging Face or pre-cache the model in the environment.
+
+---
+
+## Quick Start
+
+```powershell
+# Clone and enter the backend directory
+git clone <repo-url>
+cd context-retrieval-backend
+
+# Create and activate a virtual environment
+python -m venv .venv
+.venv\Scripts\activate
+
+# Install dependencies
+pip install -r requirements.txt
+
+# Create your environment configuration
+copy .env.example .env  # (create manually if the example is not provided)
+```
+
+### Required environment variables (`.env`)
+
+| Key | Description |
+| --- | --- |
+| `DATABASE_URL` | Async SQLAlchemy URL to PostgreSQL (e.g. `postgresql+asyncpg://user:pass@localhost:5432/context`) |
+| `ANTHROPIC_API_KEY` | API key for Anthropic Claude (used for chunk contextualization, document/project summaries, query answering) |
+| `OPENAI_API_KEY` | Optional – required if you switch `LLM_PROVIDER` to `openai` |
+| `LLM_PROVIDER` | `anthropic` (default) or `openai` |
+| `VECTOR_STORE_MODE` | `pgvector` (default) or `milvus` |
+| `EMBEDDING_VECTOR_DIM` | Dimension of the embeddings (default `768`, matches `BAAI/llm-embedder`) |
+| `MILVUS_HOST` / `MILVUS_PORT` | Milvus connection info when using the Milvus backend |
+| `MILVUS_COLLECTION_NAME` | Main collection for chunk vectors (default `document_chunks`) |
+| `MILVUS_DOCUMENT_SUMMARY_COLLECTION_NAME` | Collection for document summary vectors (defaults to `document_summary_vectors`) |
+| `MILVUS_PROJECT_SUMMARY_COLLECTION_NAME` | Collection for project summary vectors (defaults to `project_summary_vectors`) |
+| `MILVUS_VECTOR_DIM` | Milvus collection vector dimension (defaults to `EMBEDDING_VECTOR_DIM`) |
+| `MILVUS_CONSISTENCY_LEVEL` | Read consistency (defaults to `Bounded`) |
+| `GIT_REPO_PATH` | Optional absolute path to a git repo for storing uploaded documents |
+
+### Bootstrap the database and stores
+
+```powershell
+.venv\Scripts\activate
+python scripts\reset_state.py
+```
+
+`reset_state.py` performs the following:
+1. Drops and recreates all PostgreSQL tables (documents, chunks, embeddings, summaries, knowledge graph, etc.).
+2. Reapplies row-level security policies.
+3. Seeds the default tenant, project, and admin role.
+4. Drops Milvus collections (`document_chunks`, document summary, project summary) if using Milvus.
+5. Clears the `{GIT_REPO_PATH}/documents` folder so git mirrors remain in sync.
+
+### Run the API
+
+```powershell
+.venv\Scripts\activate
+python main.py
+# or uvicorn main:app --reload
+```
+
+`main.py` configures the application lifecycle: enabling `pgvector`, creating tables, applying policies, seeding defaults, and wiring FastAPI routes.
+
+---
+
+## Architecture Overview
+
+### Request Context & Multi-tenancy
+- `routers.dependencies.get_request_context_bundle` resolves tenant/project scope for the authenticated user.
+- `ContextScope` is injected into repositories/services and also registered with PostgreSQL via `set_app_context`.
+- All repositories filter by `tenant_id` and `project_id` (RLS enforces the same constraints at the DB level).
+
+### Document Ingestion
+`DocumentProcessingService.upload_and_process_document` orchestrates ingestion:
+1. **Persist metadata** via `DocumentRepository`.
+2. **Chunking:** `Chunker` uses Markdown header-aware splitting plus recursive character splitting.
+3. **Contextualization:** each chunk is enriched with additional context using an Anthropic prompt (`Embedder.contextualize_chunk_content`).
+4. **Embeddings:** SentenceTransformer `BAAI/llm-embedder` encodes contextualized chunks; vectors are persisted via the active `VectorStoreGateway`.
+5. **Summaries:** `DocumentSummaryService` generates an LLM-based summary for the full document; `ProjectSummaryService` consolidates document summaries into a project-level overview.
+6. **Knowledge Graph (optional):** `KnowledgeGraphService` updates graph entities and relationships.
+7. **Version-control:** when `GIT_REPO_PATH` is configured, the document content is written to disk and committed via `GitService`.
+
+### Query Answering
+`QueryService.process_query` coordinates the question answering flow:
+1. Persist the query and create a placeholder response row.
+2. `ClauseFormer` breaks the user’s query into sub-questions using `SubquestionDecomposer` (LLM-generated with JSON parsing fallbacks).
+3. For each sub-question:
+   - Search the vector store via the LangChain tool set (`search_chunks`).
+   - Pass retrieved context, optional conversation history, and instructions into the LLM to produce a `ClauseFormat` (statement + referenced chunk IDs).
+   - Resolve chunk IDs to full `Source` objects (content + metadata).
+4. Combine the statements into a final response, persist response text/status, and save source attributions.
+
+### Summaries
+- **Document Summaries:** `DocumentSummaryService` stores text + metadata in the `document_summaries` table and (when Milvus is active) pushes summary vectors into the summary collection.
+- **Project Summaries:** `ProjectSummaryService` aggregates document summaries per project to keep a high-level view current. Updates occur after document ingestion; the service handles both initial creation and incremental updates.
+
+---
+
+## Key Components & Code Map
+
+| Area | Location | Notes |
 | --- | --- | --- |
-| `POST` | `/api/upload` | Upload a `.txt` or `.md` document, chunk, embed, and index it. |
-| `GET` | `/api/documents` | List stored documents for the active tenant/project scope. |
-| `GET` | `/api/documents/{doc_id}` | Retrieve document metadata and UTF-8 content. |
-| `DELETE` | `/api/documents/{doc_id}` | Remove a document, associated chunks, and vectors. |
-| `POST` | `/api/query` | Embed a user query, run semantic search, and return synthesized answer + sources. |
-| `GET` | `/health` | Basic service health probe. |
+| HTTP API | `routers/` | Documents, queries, dependencies; `main.py` mounts routers. |
+| Services | `services/` | Business workflows for documents, queries, summaries, knowledge, search. |
+| Repositories | `infrastructure/database/repositories/` | Async SQLAlchemy repositories scoped by `ContextScope`. |
+| Models | `infrastructure/database/models/` | ORM definitions (`documents`, `chunks`, summaries, knowledge graph, tenancy, etc.). |
+| Vector Store | `infrastructure/vector_store/` | `PgVectorStore`, `MilvusVectorStore`, and factory/wrappers. |
+| AI Helpers | `infrastructure/ai/` | Chunker, embedder, user intent decomposition, Milvus tooling, prompt loaders. |
+| Config | `config/settings.py` | Central place for environment configuration. |
+| Reset & Smoke Tests | `scripts/reset_state.py`, `scripts/milvus_smoke_test.py`, `tests/` | Admin utilities and automated checks. |
 
-## Processing Pipelines
-### Document Flow
-1. Persist document metadata/content via `DocumentRepository` without immediate commit (FastAPI handles transaction lifecycle).
-2. Split text with `Chunker` (Markdown-aware + recursive character splitter) running in an executor to stay non-blocking.
-3. Contextualize each chunk with an LLM prompt (`prompts/contextualize_chunk.md`) and embed via SentenceTransformer.
-4. Persist chunk rows, upsert vector embeddings through `VectorStoreGateway`, and optionally stage file artifacts + git commit.
+---
 
-### Query Flow
-1. Create a query row and generate an embedding for the request text.
-2. Execute semantic search constrained to tenant/project scope using the active vector backend.
-3. Record a placeholder response row, call the configured LLM with top search contexts, then update the response text and status.
-4. Persist source links for each retrieved chunk to drive attribution in downstream clients.
+## API Endpoints (current)
 
-## Storage & Infrastructure
-- **Database:** Async SQLAlchemy models with repositories for documents, chunks, queries, responses, and sources; helper deletes ensure vectors are cleaned alongside relational rows.
-- **Vector backends:** `PgVectorStore` performs similarity queries via SQL; `MilvusVectorStore` integrates with Milvus SDK, with health and smoke tests under `scripts/` and `tests/`.
-- **Context propagation:** `routers.dependencies.get_request_context_bundle` resolves tenant/project membership from `UserProjectRole` and ensures a single-tenant constraint before serving requests.
+| Method | Path | Description |
+| --- | --- | --- |
+| `POST` | `/api/upload` | Upload `.txt`/`.md` document, chunk, embed, summarize, and index it. |
+| `GET` | `/api/documents` | List documents for the current tenant/project scope. |
+| `GET` | `/api/documents/{doc_id}` | Retrieve full document content and metadata. |
+| `PUT` | `/api/documents/{doc_id}` | Update document content and regenerate chunks/embeddings/summaries. |
+| `DELETE` | `/api/documents/{doc_id}` | Delete document, chunks, embeddings, summaries. |
+| `PUT` | `/api/documents/{doc_id}/chunks/{chunk_id}` | Edit individual chunk content. |
+| `POST` | `/api/query` | Submit a question and receive a sourced answer. |
+| `GET` | `/health` | Health probe. |
 
-## Test & Verification Coverage
-- `tests/test_sync_upload.py` validates the synchronous upload pathway, database writes, and vector index interactions.
-- `tests/test_end_to_end_smoke.py` drives the HTTP stack (FastAPI + background processing) for upload and query flows when the API is running.
-- `tests/test_vector_store.py` and `tests/test_milvus_vector_store.py` cover pgvector and Milvus adapters respectively.
-- `tests/test_milvus_smoke.py` exercises Milvus connectivity with optional environment gating.
-- `tests/test_multi_tenant_repositories.py` verifies tenant/project scoping across repositories.
-- `tests/test_git_versioning.py` ensures git commits trigger correctly when repository settings are supplied.
+> Query and document routes expect valid tenant/project context (usually set via auth middleware or dependencies).
 
-## Runbook
-### Start the API
+---
+
+## Running Tests & Smoke Checks
+
 ```powershell
 .venv\Scripts\activate
-python main.py
+python -m pytest
 ```
 
-### Milvus Smoke Test
+Environment-gated tests:
+- `RUN_E2E_SMOKE_TESTS=1` — run HTTP ingestion/query smoke test (requires API running separately).
+- `RUN_MILVUS_SMOKE_TESTS=1` — include Milvus adapter smoke tests (requires Milvus).
+
+Standalone script:
+
 ```powershell
-# Requires VECTOR_STORE_MODE=milvus with Milvus/PostgreSQL reachable
 .venv\Scripts\activate
-python scripts\milvus_smoke_test.py
+python scripts\milvus_smoke_test.py  # when using Milvus
 ```
 
-### HTTP End-to-End Smoke Test
-```powershell
-# Terminal 1 – start the API
-.venv\Scripts\activate
-python main.py
+---
 
-# Terminal 2 – run the smoke test suite
-$env:RUN_E2E_SMOKE_TESTS="1"
-.venv\Scripts\activate
-python -m pytest tests/test_end_to_end_smoke.py
-```
+## Operational Notes
 
-The HTTP smoke test self-skips if the API is unreachable. Set `RUN_MILVUS_SMOKE_TESTS=1` to include Milvus checks inside the pytest run. Ensure `MILVUS_VECTOR_DIM` matches the embedding model output (`768` by default).
+- **Resets:** Use `python scripts/reset_state.py` whenever you need a clean slate (drops DB + Milvus + document directory).
+- **Embedding dimension:** Ensure `EMBEDDING_VECTOR_DIM` and `MILVUS_VECTOR_DIM` align with the embedding model output.
+- **LLM costs:** Document and project summarization, chunk contextualization, and query responses all consume Anthropic tokens. Adjust prompts/thresholds as needed for cost control.
+- **Milvus collections:** Collection names default to `document_chunks`, `document_summary_vectors`, and `project_summary_vectors`; override via environment variables if you run multiple instances against the same Milvus cluster.
+- **Git mirroring:** Set `GIT_REPO_PATH` to a repository containing a `documents/` folder; the service will stage and commit changes with a generic author unless overridden by `GIT_AUTHOR_NAME/EMAIL`.
+
+---
+
+## Extending the System
+
+- **New document formats:** Enhance `Chunker` or add preprocessing steps before `DocumentProcessingService.process_document`.
+- **Alternative LLM providers:** Update `config/settings.py` and the service constructors to inject different `BaseChatModel` instances.
+- **Custom vector stores:** Implement `VectorStoreGateway` and register it in `infrastructure/vector_store/factory.py`.
+- **Scheduling summary refreshes:** `ProjectSummaryService` exposes `update_summary()` for manual or scheduled triggers.
+
+---
+
+## Troubleshooting
+
+| Symptom | Likely Cause | Resolution |
+| --- | --- | --- |
+| `ProgrammingError: relation ... already exists` | Metadata mismatch between ORM and DB (e.g., manual schema tweaks) | Run `python scripts/reset_state.py` or Alembic migrations as needed. |
+| `tuple object has no attribute content` on document upload | LLM response returned as tuple/list | Ensure the latest code with `_coerce_to_text` helpers is deployed. |
+| `Input to ChatPromptTemplate is missing variables {'message_history'}` | Pipeline dropped the history variable | Confirm `ClauseFormer` is passing `message_history` through (fixed in latest code). |
+| Milvus connection errors | Incorrect host/port or auth | Verify env vars, run `scripts/milvus_smoke_test.py`, check Milvus server status. |
+| Missing git commits | `GIT_REPO_PATH` not set or repo path invalid | Configure env var to a valid repo; check logs for pygit2 errors. |
+

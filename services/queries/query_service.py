@@ -1,8 +1,10 @@
 from sqlalchemy.ext.asyncio import AsyncSession
 from infrastructure.context import ContextScope
 from infrastructure.database.repositories.query_repository import QueryRepository
+from infrastructure.database.repositories import ProjectSummaryRepository
 from schemas import Source, Clause
 from langchain_openai import ChatOpenAI
+from langchain_core.prompts.chat import SystemMessage
 from langchain_anthropic import ChatAnthropic
 from services.ai.agentic_tools.clause_former import ClauseFormer
 from typing import Dict, Any
@@ -19,6 +21,7 @@ class QueryService:
         self.context = context
         self.query_repo = QueryRepository(db, context)
         self.clause_former = ClauseFormer(chatmodel, db, context)
+        self.project_summary_repo = ProjectSummaryRepository(db, context)
 
     async def process_query(self, query_text: str) -> Dict[str, Any]:
         """Process a query: create query, search, generate response, store results."""
@@ -29,7 +32,13 @@ class QueryService:
         response = await self.query_repo.create_response(query.id)
         
         try:
-            response_clauses = await self.clause_former.get_response(message_history=[], user_query=query_text)
+            
+            project_summary = await self.project_summary_repo.get_by_project_id()
+            if project_summary and project_summary.summary_text:
+                project_context = SystemMessage(f"You are an assistant researcher for a product manager. This is the context of the product: {project_summary.summary_text}")
+            
+            
+            response_clauses = await self.clause_former.get_response(message_history=[project_context], user_query=query_text)
             
             response_text = "\n\n".join([clause.statement for clause in response_clauses])
             

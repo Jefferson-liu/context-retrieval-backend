@@ -12,6 +12,7 @@ from infrastructure.vector_store import VectorRecord, create_vector_store
 from langchain_anthropic import ChatAnthropic
 from config import settings
 from services.knowledge import KnowledgeGraphService
+from services.summaries import DocumentSummaryService, ProjectSummaryService
 
 
 claude_haiku = ChatAnthropic(temperature=0, model_name="claude-3-5-haiku-latest", api_key=settings.ANTHROPIC_API_KEY)
@@ -29,6 +30,12 @@ class DocumentProcessingService:
         self.document_file_service = DocumentFileService()
         self.vector_store = create_vector_store(db)
         self.knowledge_service = KnowledgeGraphService(db, context, llm=claude_haiku)
+        self.project_summary_service = ProjectSummaryService(db, context, llm=claude_haiku)
+        self.document_summary_service = DocumentSummaryService(
+            db,
+            context,
+            llm=claude_haiku,
+        )
         
         
     async def upload_and_process_document(
@@ -115,6 +122,14 @@ class DocumentProcessingService:
             doc_name or "",
             content,
         )
+        
+        await self.document_summary_service.upsert_summary(
+            document_id=document_id,
+            document_content=content,
+        )
+        
+        await self.project_summary_service.update_summary()
+
 
     async def update_document(
         self,
