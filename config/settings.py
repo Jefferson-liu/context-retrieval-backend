@@ -6,15 +6,14 @@ load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), '..', '.env'))
 
 DATABASE_URL = os.getenv("DATABASE_URL")
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 GIT_REPO_PATH = os.getenv("GIT_REPO_PATH")
-LLM_PROVIDER = "openai"  # or "anthropic"
+LLM_PROVIDER = os.getenv("LLM_PROVIDER", "anthropic").lower()
 
 # Embedding/vector configuration
 EMBEDDING_VECTOR_DIM = int(os.getenv("EMBEDDING_VECTOR_DIM", "768"))
 
 # Vector store backend configuration
-VECTOR_STORE_MODE = os.getenv("VECTOR_STORE_MODE", "pgvector").lower()
+VECTOR_STORE_MODE = os.getenv("VECTOR_STORE_MODE", "milvus").lower()
 MILVUS_HOST = os.getenv("MILVUS_HOST", "localhost")
 MILVUS_PORT = int(os.getenv("MILVUS_PORT", "19530"))
 MILVUS_USERNAME = os.getenv("MILVUS_USERNAME")

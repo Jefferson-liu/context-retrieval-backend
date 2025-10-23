@@ -51,9 +51,8 @@ copy .env.example .env  # (create manually if the example is not provided)
 | --- | --- |
 | `DATABASE_URL` | Async SQLAlchemy URL to PostgreSQL (e.g. `postgresql+asyncpg://user:pass@localhost:5432/context`) |
 | `ANTHROPIC_API_KEY` | API key for Anthropic Claude (used for chunk contextualization, document/project summaries, query answering) |
-| `OPENAI_API_KEY` | Optional – required if you switch `LLM_PROVIDER` to `openai` |
-| `LLM_PROVIDER` | `anthropic` (default) or `openai` |
-| `VECTOR_STORE_MODE` | `pgvector` (default) or `milvus` |
+| `LLM_PROVIDER` | Defaults to `anthropic`; set to `openai` if you provide OpenAI credentials |
+| `VECTOR_STORE_MODE` | Defaults to `milvus`; set to `pgvector` if you want to use PostgreSQL vectors |
 | `EMBEDDING_VECTOR_DIM` | Dimension of the embeddings (default `768`, matches `BAAI/llm-embedder`) |
 | `MILVUS_HOST` / `MILVUS_PORT` | Milvus connection info when using the Milvus backend |
 | `MILVUS_COLLECTION_NAME` | Main collection for chunk vectors (default `document_chunks`) |
@@ -86,6 +85,27 @@ python main.py
 ```
 
 `main.py` configures the application lifecycle: enabling `pgvector`, creating tables, applying policies, seeding defaults, and wiring FastAPI routes.
+
+---
+
+## Docker Compose (all services)
+
+Use the provided `docker-compose.yml` to spin up the API, PostgreSQL with pgvector, and Milvus in one command.
+
+1. Edit `.env.docker` and add your secrets (at minimum set `ANTHROPIC_API_KEY`; update `DATABASE_URL` if you change credentials).
+2. Build and start everything:  
+   ```powershell
+   docker compose up --build
+   ```
+3. Wait for the logs to show the API is serving on `0.0.0.0:8000`, then hit `http://localhost:8000/health`.
+
+The compose stack includes supporting Milvus dependencies (etcd, MinIO, Milvus standalone) and exposes the following host ports:
+- API: `8000`
+- PostgreSQL (pgvector): `5432`
+- Milvus: `19530`, `9091`
+- MinIO console/API: `9001`, `9000`
+
+The compose file persists database, Milvus, and Hugging Face caches in named volumes. Stop the stack with `docker compose down`; add `--volumes` if you want a clean slate.
 
 ---
 
@@ -202,4 +222,3 @@ python scripts\milvus_smoke_test.py  # when using Milvus
 | `Input to ChatPromptTemplate is missing variables {'message_history'}` | Pipeline dropped the history variable | Confirm `ClauseFormer` is passing `message_history` through (fixed in latest code). |
 | Milvus connection errors | Incorrect host/port or auth | Verify env vars, run `scripts/milvus_smoke_test.py`, check Milvus server status. |
 | Missing git commits | `GIT_REPO_PATH` not set or repo path invalid | Configure env var to a valid repo; check logs for pygit2 errors. |
-

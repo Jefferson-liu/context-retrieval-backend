@@ -15,6 +15,7 @@ from infrastructure.database.setup import (
 # Import routers
 from routers.document_router import router as document_router
 from routers.query_router import router as query_router
+from routers.knowledge_router import router as knowledge_router
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -54,6 +55,7 @@ app.add_middleware(
 # Include routers
 app.include_router(document_router, prefix="/api", tags=["Document"])
 app.include_router(query_router, prefix="/api", tags=["Query"])
+app.include_router(knowledge_router, prefix="/api", tags=["Knowledge"])
 
 # Health check
 @app.get("/health")

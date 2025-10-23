@@ -1,0 +1,17 @@
+.git
+.gitignore
+.env
+.venv
+__pycache__/
+.pytest_cache/
+.mypy_cache/
+*.pyc
+*.pyo
+*.pyd
+*.log
+*.sqlite
+cache/
+dist/
+build/
+node_modules/
+*.egg-info/
