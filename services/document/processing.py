@@ -1,4 +1,5 @@
 import asyncio
+import logging
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -13,9 +14,11 @@ from langchain_anthropic import ChatAnthropic
 from config import settings
 from services.knowledge import KnowledgeGraphService
 from services.summaries import DocumentSummaryService, ProjectSummaryService
+from services.version_control import CommitMessageService
 
 
 claude_haiku = ChatAnthropic(temperature=0, model_name="claude-3-5-haiku-latest", api_key=settings.ANTHROPIC_API_KEY)
+logger = logging.getLogger(__name__)
 
 
 class DocumentProcessingService:
@@ -27,6 +30,7 @@ class DocumentProcessingService:
         self.chunker = Chunker()
         self.embedder = Embedder(claude_haiku)
         self.git_service = GitService()
+        self.commit_message_service = CommitMessageService(claude_haiku)
         self.document_file_service = DocumentFileService()
         self.vector_store = create_vector_store(db)
         self.knowledge_service = KnowledgeGraphService(db, context, llm=claude_haiku)
@@ -58,7 +62,12 @@ class DocumentProcessingService:
 
         file_path = await self.document_file_service.write_document(doc_id, doc_name, content)
         if file_path:
-            message = commit_message or f"Upload document: {doc_name}"
+            message = commit_message or await self._build_commit_message(
+                action="Add document",
+                doc_name=doc_name,
+                details=f"Type: {doc_type}" if doc_type else None,
+                fallback=f"Upload document: {doc_name}",
+            )
             await self.git_service.commit_changes(message=message, added_paths=[file_path])
 
         # FastAPI will automatically commit the transaction on successful response
@@ -162,7 +171,12 @@ class DocumentProcessingService:
 
         file_path = await self.document_file_service.write_document(document_id, doc_name, context)
         if file_path:
-            message = commit_message or f"Update document: {doc_name}"
+            message = commit_message or await self._build_commit_message(
+                action="Update document",
+                doc_name=doc_name,
+                details=f"Doc type: {document.doc_type}" if document.doc_type else None,
+                fallback=f"Update document: {doc_name}",
+            )
             await self.git_service.commit_changes(message=message, added_paths=[file_path])
         return True
 
@@ -182,7 +196,32 @@ class DocumentProcessingService:
         if success:
             file_path = await self.document_file_service.delete_document(document_id, document.doc_name)
             if file_path:
-                message = commit_message or f"Delete document: {document.doc_name}"
+                message = commit_message or await self._build_commit_message(
+                    action="Remove document",
+                    doc_name=document.doc_name,
+                    details=None,
+                    fallback=f"Delete document: {document.doc_name}",
+                )
                 await self.git_service.commit_changes(message=message, removed_paths=[file_path])
         return success
+
+    async def _build_commit_message(
+        self,
+        *,
+        action: str,
+        doc_name: str,
+        details: str | None,
+        fallback: str,
+    ) -> str:
+        if not self.commit_message_service:
+            return fallback
+        try:
+            return await self.commit_message_service.generate_message(
+                action=action,
+                doc_name=doc_name,
+                details=details,
+            )
+        except Exception as exc:
+            logger.warning("Failed to generate commit message via LLM: %s", exc)
+            return fallback
     
