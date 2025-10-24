@@ -106,7 +106,11 @@ class ChunkRepository:
             Embedding.project_id.in_(self.context.project_ids),
         )
         result = await self.db.execute(stmt)
-        return result.scalar_one_or_none()
+        embedding = result.scalar_one_or_none()
+        if embedding is not None:
+            # Expire cached state so callers see the latest vector data after raw SQL upserts.
+            await self.db.refresh(embedding)
+        return embedding
     
     async def get_chunks_with_embeddings(self) -> List[Tuple]:
         stmt = (

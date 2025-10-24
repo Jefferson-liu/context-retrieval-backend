@@ -7,6 +7,8 @@ import requests
 
 API_BASE_URL = os.getenv("SMOKE_TEST_API_URL", "http://127.0.0.1:8000/api")
 RUN_E2E_SMOKE = os.getenv("RUN_E2E_SMOKE_TESTS", "0") == "1"
+TESTFILES_DIR = Path(__file__).resolve().parents[1] / "testfiles"
+SMOKE_TEST_FILE = TESTFILES_DIR / "smoke_test_document.txt"
 
 
 def _wait_for_api(url: str, attempts: int = 5, delay: float = 1.0) -> bool:
@@ -36,11 +38,10 @@ def test_upload_process_and_query_roundtrip():
     upload_url = f"{API_BASE_URL}/upload"
     query_url = f"{API_BASE_URL}/query"
 
-    fixture_path = Path(__file__).parent / "fixtures" / "smoke_test_document.txt"
-    document_bytes = fixture_path.read_bytes()
+    document_bytes = SMOKE_TEST_FILE.read_bytes()
 
     files = {
-        "file": (fixture_path.name, document_bytes, "text/plain"),
+        "file": (SMOKE_TEST_FILE.name, document_bytes, "text/plain"),
     }
 
     upload_response = requests.post(upload_url, files=files, timeout=30)

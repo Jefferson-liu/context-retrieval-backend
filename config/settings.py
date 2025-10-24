@@ -13,7 +13,7 @@ LLM_PROVIDER = os.getenv("LLM_PROVIDER", "anthropic").lower()
 EMBEDDING_VECTOR_DIM = int(os.getenv("EMBEDDING_VECTOR_DIM", "768"))
 
 # Vector store backend configuration
-VECTOR_STORE_MODE = os.getenv("VECTOR_STORE_MODE", "milvus").lower()
+VECTOR_STORE_MODE = os.getenv("VECTOR_STORE_MODE", "pgvector").lower()
 MILVUS_HOST = os.getenv("MILVUS_HOST", "localhost")
 MILVUS_PORT = int(os.getenv("MILVUS_PORT", "19530"))
 MILVUS_USERNAME = os.getenv("MILVUS_USERNAME")

@@ -127,20 +127,19 @@ def test_chunk_editing_updates_chunk_and_embedding():
             )
 
             updated_chunk = await service.update_chunk(
-                document.id,
                 chunk.id,
                 content="updated content",
-                context_override="manual context",
             )
 
             assert updated_chunk is not None
             assert updated_chunk.content == "updated content"
-            assert updated_chunk.context == "manual context"
-            assert embedder.contextualize_calls == []
-            assert embedder.generate_calls[-1] == "manual context updated content"
+            assert updated_chunk.context == "context::updated content"
+
+            expected_manual_body = document_body.replace("original content", "updated content", 1)
+            assert embedder.contextualize_calls == [("updated content", expected_manual_body)]
+            assert embedder.generate_calls[-1] == "context::updated content updated content"
 
             await session.refresh(document)
-            expected_manual_body = document_body.replace("original content", "updated content", 1)
             assert document.content == expected_manual_body
             assert document.context == expected_manual_body
             assert document.doc_size == len(expected_manual_body)
@@ -148,10 +147,9 @@ def test_chunk_editing_updates_chunk_and_embedding():
             embedding_row = await chunk_repo.get_embedding_by_chunk_id(chunk.id)
             assert embedding_row is not None
             stored_values = list(embedding_row.embedding)
-            assert all(value == 1.0 for value in stored_values[:3])
+            assert all(value == 1.0 for value in stored_values[:3]), stored_values[:3]
 
             updated_chunk = await service.update_chunk(
-                document.id,
                 chunk.id,
                 content="second content",
             )
@@ -159,7 +157,10 @@ def test_chunk_editing_updates_chunk_and_embedding():
             assert updated_chunk is not None
             await session.refresh(document)
             expected_second_body = expected_manual_body.replace("updated content", "second content", 1)
-            assert embedder.contextualize_calls == [("second content", expected_second_body)]
+            assert embedder.contextualize_calls == [
+                ("updated content", expected_manual_body),
+                ("second content", expected_second_body),
+            ]
             assert embedder.generate_calls[-1] == "context::second content second content"
 
             assert document.content == expected_second_body
@@ -169,7 +170,7 @@ def test_chunk_editing_updates_chunk_and_embedding():
             embedding_row = await chunk_repo.get_embedding_by_chunk_id(chunk.id)
             assert embedding_row is not None
             stored_values = list(embedding_row.embedding)
-            assert all(value == 2.0 for value in stored_values[:3])
+            assert all(value == 2.0 for value in stored_values[:3]), stored_values[:3]
 
         finally:
             try:
