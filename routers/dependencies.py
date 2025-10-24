@@ -52,13 +52,15 @@ async def get_request_context_bundle(
     return RequestContextBundle(db=db, scope=scope)
 
 
-async def require_api_key(x_api_key: Optional[str] = Header(None, convert_underscores=False)) -> None:
-    expected = settings.API_AUTH_TOKEN
+async def require_api_key(x_api_key: Optional[str] = Header(None, alias="X-API-Key")) -> None:
+    expected_raw = settings.API_AUTH_TOKEN
+    expected = expected_raw.strip().strip('"') if expected_raw else ""
     if not expected:
         # No API key configured; allow all requests.
         return
-    if not x_api_key or not hmac.compare_digest(x_api_key, expected):
+    provided = x_api_key.strip().strip('"') if x_api_key else ""
+    if not provided or not hmac.compare_digest(provided, expected):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid or missing API key",
+            detail=f"provided API key: {provided}, expected API key: {expected}",
         )
