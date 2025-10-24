@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import logging
 
 from infrastructure.ai.user_intent import SubquestionDecomposer
@@ -30,14 +32,30 @@ class ClauseFormat(BaseModel):
     async def to_clause(self, chunk_repo: ChunkRepository, doc_repo: DocumentRepository) -> Clause:
         resolved_sources: List[Source] = []
         for source_ref in self.sources:
-            content = await chunk_repo.get_content_by_chunk_id(source_ref.chunk_id)
-            document = await doc_repo.get_document_by_id(source_ref.doc_id)
+            chunk_obj = None
+            if source_ref.chunk_id:
+                chunk_obj = await chunk_repo.get_chunk_by_id(source_ref.chunk_id)
+
+            if chunk_obj:
+                final_chunk_id = chunk_obj.id
+                content = (chunk_obj.content or "").strip()
+                doc_id = chunk_obj.doc_id
+            else:
+                final_chunk_id = None
+                doc_id = source_ref.doc_id
+                content = (
+                    await chunk_repo.get_content_by_chunk_id(source_ref.chunk_id)
+                    if source_ref.chunk_id
+                    else ""
+                ) or ""
+
+            document = await doc_repo.get_document_by_id(doc_id) if doc_id else None
             doc_name = document.doc_name if document else "Unknown Document"
             resolved_sources.append(
                 Source(
-                    doc_id=source_ref.doc_id,
-                    chunk_id=source_ref.chunk_id,
-                    content=content or "",
+                    doc_id=doc_id or source_ref.doc_id,
+                    chunk_id=final_chunk_id,
+                    content=content,
                     doc_name=doc_name,
                 )
             )
@@ -55,7 +73,12 @@ class ClauseFormer:
         self.doc_repo = DocumentRepository(db, context)
         self.search_service = SearchService(db, context, Embedder())
 
-    async def form_clause(self, subquestion: str, message_history: List[BaseMessage]) -> ClauseFormat:
+    async def form_clause(
+        self,
+        subquestion: str,
+        message_history: List[BaseMessage],
+        prior_clauses: Optional[List[ClauseFormat]] = None,
+    ) -> Optional[ClauseFormat]:
         print(subquestion)
         search_tool = self.tools["search_chunks"]
         
@@ -68,10 +91,21 @@ class ClauseFormer:
                 "context": context,
                 "subquestion": subquestion,
                 "message_history": history,
+                "prior_statements": input_dict.get("prior_statements", "None yet"),
             }
         
         tool_chain = RunnableLambda(call_tool_and_format)
-        prompt_template = "Based on this context\n\n{context}\n\nAnswer this question:\n\nquestion: {subquestion}"
+        prior_summary = "None yet."
+        if prior_clauses:
+            limited = [clause for clause in prior_clauses if clause and clause.statement][:5]
+            if limited:
+                prior_summary = "\n".join(f"- {clause.statement}" for clause in limited)
+
+        prompt_template = (
+            "Previously formed clauses (avoid repeating these points):\n{prior_statements}\n\n"
+            "Based on this context:\n\n{context}\n\n"
+            "Answer this subquestion with new information:\n{subquestion}"
+        )
         prompt = ChatPromptTemplate.from_messages([
             MessagesPlaceholder(variable_name="message_history"),
             SystemMessage(
@@ -80,7 +114,8 @@ class ClauseFormer:
                     "Use the context to answer the question as accurately as you can. "
                     "Do not make up an answer. "
                     "Return once you can answer with cited sources. No need for excessive detail. No need for background information or context."
-                    "Only use the information provided in the context"
+                    "Only use the information provided in the context. "
+                    "If earlier clauses already cover a point, focus on complementary details."
                     "If you can't find the answer or the context is unusable, say 'I don't know' and do not cite any sources and do not explain why you don't know."
                 )
             ),
@@ -89,10 +124,15 @@ class ClauseFormer:
         clause_llm = self.llm.with_structured_output(ClauseFormat)
         full_chain = tool_chain | prompt | clause_llm
         message_chain = tool_chain | prompt
-        messages = await message_chain.ainvoke({"subquestion": subquestion, "message_history": message_history})
+        chain_input = {
+            "subquestion": subquestion,
+            "message_history": message_history,
+            "prior_statements": prior_summary,
+        }
+        messages = await message_chain.ainvoke(chain_input)
         print("Input to Anthropic LLM:")
         print("Messages object:", messages)
-        response: ClauseFormat = await full_chain.ainvoke({"subquestion": subquestion, "message_history": message_history})
+        response: ClauseFormat = await full_chain.ainvoke(chain_input)
         print("Clause response:", response)
         if not response or not response.sources:
             return None
@@ -102,9 +142,14 @@ class ClauseFormer:
     async def get_response(self, message_history: List[BaseMessage], user_query: str) -> List[Clause]:
         topics = await self.subquestion_decomposer.get_required_subquestions(message_history, user_query)
         all_clauses = []
+        prior_clause_formats: List[ClauseFormat] = []
         for topic in topics:
-            clause: ClauseFormat = await self.form_clause(topic, message_history)
+            clause_format = await self.form_clause(topic, message_history, prior_clause_formats)
+            if not clause_format:
+                continue
+            clause: ClauseFormat = clause_format
             if clause and clause.sources:
-                print("Formed clause:", clause)
+                #print("Formed clause:", clause)
+                prior_clause_formats.append(clause)
                 all_clauses.append(await clause.to_clause(self.chunk_repo, self.doc_repo))
         return all_clauses

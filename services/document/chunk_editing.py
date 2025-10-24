@@ -11,7 +11,11 @@ from infrastructure.context import ContextScope
 from infrastructure.database.repositories import ChunkRepository, DocumentRepository
 from infrastructure.vector_store import VectorRecord, create_vector_store
 from langchain_anthropic import ChatAnthropic
+from langchain_core.language_models.chat_models import BaseChatModel
 from infrastructure.database.models.documents import Chunk
+from services.summaries import DocumentSummaryService, ProjectSummaryService
+from services.knowledge import KnowledgeGraphService
+
 
 
 class ChunkEditingService:
@@ -24,6 +28,9 @@ class ChunkEditingService:
         *,
         embedder: Optional[Embedder] = None,
         vector_store=None,
+        summary_llm: Optional[BaseChatModel] = None,
+        document_summary_service: Optional[DocumentSummaryService] = None,
+        project_summary_service: Optional[ProjectSummaryService] = None,
     ) -> None:
         self.db = db
         self.context = context
@@ -32,11 +39,31 @@ class ChunkEditingService:
         self.embedder = embedder or Embedder(
             ChatAnthropic(
                 temperature=0,
-                model_name="claude-3-5-sonnet-latest",
+                model_name="claude-3-5-haiku-latest",
                 api_key=settings.ANTHROPIC_API_KEY,
             )
         )
         self.vector_store = vector_store or create_vector_store(db)
+        self.summary_llm = summary_llm or ChatAnthropic(
+            temperature=0,
+            model_name="claude-3-5-haiku-latest",
+            api_key=settings.ANTHROPIC_API_KEY,
+        )
+        self.document_summary_service = document_summary_service or DocumentSummaryService(
+            db,
+            context,
+            llm=self.summary_llm,
+        )
+        self.project_summary_service = project_summary_service or ProjectSummaryService(
+            db,
+            context,
+            llm=self.summary_llm,
+        )
+        self.knowledge_service = KnowledgeGraphService(
+            db,
+            context,
+            llm=self.summary_llm,
+        )
         self._chunker = Chunker()
         self._chunk_size_hint = max(1, getattr(self._chunker, "chunk_size", 512))
         self._chunk_overlap_hint = max(0, getattr(self._chunker, "overlap_size", 0))
@@ -74,6 +101,7 @@ class ChunkEditingService:
 
         document = await self.document_repository.get_document_by_id(doc_id)
         document_text = document.content
+        doc_name = document.doc_name if document else ""
 
         current_content = chunk.content
         current_context = chunk.context
@@ -129,12 +157,22 @@ class ChunkEditingService:
             await self.db.flush()
 
         if document and doc_updated:
-            await self.document_repository.edit_document(
+            document = await self.document_repository.edit_document(
                 doc_id,
                 content=updated_doc_body,
                 context=updated_doc_body,
                 doc_size=len(updated_doc_body),
             )
+            await self.knowledge_service.refresh_document_knowledge(
+                document_id=doc_id,
+                document_name=doc_name,
+                document_content=updated_doc_body,
+            )
+            await self.document_summary_service.upsert_summary(
+                document_id=doc_id,
+                document_content=updated_doc_body,
+            )
+            await self.project_summary_service.update_summary()
 
         await self.db.flush()
 

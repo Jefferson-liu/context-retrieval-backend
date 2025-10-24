@@ -240,6 +240,22 @@ class KnowledgeRelationshipRepository:
         await self.db.flush()
         return len(relationships)
 
+    async def entity_has_relationships(self, entity_id: int) -> bool:
+        stmt = (
+            select(KnowledgeRelationship.id)
+            .where(
+                KnowledgeRelationship.tenant_id == self.context.tenant_id,
+                KnowledgeRelationship.project_id.in_(self.context.project_ids),
+                or_(
+                    KnowledgeRelationship.source_entity_id == entity_id,
+                    KnowledgeRelationship.target_entity_id == entity_id,
+                ),
+            )
+            .limit(1)
+        )
+        result = await self.db.execute(stmt)
+        return result.scalar_one_or_none() is not None
+
 
 class KnowledgeRelationshipMetadataRepository:
     """Repository helpers for relationship metadata entries."""

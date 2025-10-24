@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from typing import Dict, Optional, Tuple
 
+from sqlalchemy import select
+
 from langchain_core.language_models.chat_models import BaseChatModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -15,6 +17,10 @@ from infrastructure.database.repositories.knowledge_repository import (
     KnowledgeEntityRepository,
     KnowledgeRelationshipMetadataRepository,
     KnowledgeRelationshipRepository,
+)
+from infrastructure.database.models.knowledge import (
+    KnowledgeRelationship,
+    KnowledgeRelationshipMetadata,
 )
 
 
@@ -53,6 +59,8 @@ class KnowledgeGraphService:
         if not self.extractor:
             return
 
+        await self._purge_document_knowledge(document_id)
+
         if not document_content.strip():
             return
 
@@ -80,6 +88,37 @@ class KnowledgeGraphService:
                 relationship=relationship,
                 document_id=document_id,
             )
+
+    async def _purge_document_knowledge(self, document_id: int) -> None:
+        stmt = (
+            select(KnowledgeRelationship)
+            .join(
+                KnowledgeRelationshipMetadata,
+                KnowledgeRelationshipMetadata.relationship_id == KnowledgeRelationship.id,
+            )
+            .where(
+                KnowledgeRelationshipMetadata.key == self.DOCUMENT_METADATA_KEY,
+                KnowledgeRelationshipMetadata.value == str(document_id),
+                KnowledgeRelationship.tenant_id == self.context.tenant_id,
+                KnowledgeRelationship.project_id.in_(self.context.project_ids),
+            )
+        )
+        result = await self.db.execute(stmt)
+        relationships = result.scalars().all()
+        if not relationships:
+            return
+
+        entity_ids = set()
+        for relationship in relationships:
+            entity_ids.add(relationship.source_entity_id)
+            entity_ids.add(relationship.target_entity_id)
+            await self.db.delete(relationship)
+
+        await self.db.flush()
+
+        for entity_id in entity_ids:
+            if not await self.relationship_repository.entity_has_relationships(entity_id):
+                await self.entity_repository.delete_entity(entity_id)
 
     async def _get_or_create_entity(self, entity: ExtractedEntity):
         existing = await self.entity_repository.get_entity_by_name_and_type(

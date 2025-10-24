@@ -7,7 +7,7 @@ from langchain_openai import ChatOpenAI
 from langchain_core.prompts.chat import SystemMessage
 from langchain_anthropic import ChatAnthropic
 from services.ai.agentic_tools.clause_former import ClauseFormer
-from typing import Dict, Any
+from typing import Dict, Any, List
 
 from config import settings
 
@@ -32,15 +32,20 @@ class QueryService:
         response = await self.query_repo.create_response(query.id)
         
         try:
-            
+            message_history = []
             project_summary = await self.project_summary_repo.get_by_project_id()
             if project_summary and project_summary.summary_text:
-                project_context = SystemMessage(f"You are an assistant researcher for a product manager. This is the context of the product: {project_summary.summary_text}")
+                project_context = SystemMessage(
+                    f"You are an assistant researcher for a product manager. This is the context of the product: {project_summary.summary_text}"
+                )
+                message_history.append(project_context)
+
+            response_clauses = await self.clause_former.get_response(
+                message_history=message_history,
+                user_query=query_text,
+            )
             
-            
-            response_clauses = await self.clause_former.get_response(message_history=[project_context], user_query=query_text)
-            
-            response_text = "\n\n".join([clause.statement for clause in response_clauses])
+            response_text = self._compose_cohesive_response(response_clauses)
             
             # Update the response with the generated text
             response = await self.query_repo.update_response_text(response.id, response_text)
@@ -83,3 +88,30 @@ class QueryService:
             await self.db.rollback()  # Reset session state after rollback
             await self.query_repo.update_response_status(response.id, 'failed')
             raise e
+
+    def _compose_cohesive_response(self, clauses: List[Clause]) -> str:
+        if not clauses:
+            return ""
+
+        connectors = [
+            "Additionally,",
+            "Furthermore,",
+            "In addition,",
+            "Finally,",
+        ]
+        sentences: List[str] = []
+        connector_index = 0
+
+        for idx, clause in enumerate(clauses):
+            statement = (clause.statement or "").strip()
+            if not statement:
+                continue
+            if idx == 0:
+                sentences.append(statement)
+                continue
+
+            connector = connectors[min(connector_index, len(connectors) - 1)]
+            connector_index = min(connector_index + 1, len(connectors) - 1)
+            sentences.append(f"{connector} {statement}")
+
+        return " ".join(sentences)

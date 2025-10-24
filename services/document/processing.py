@@ -17,7 +17,7 @@ from services.summaries import DocumentSummaryService, ProjectSummaryService
 from services.version_control import CommitMessageService
 
 
-claude_haiku = ChatAnthropic(temperature=0, model_name="claude-3-5-haiku-latest", api_key=settings.ANTHROPIC_API_KEY)
+claude_haiku = ChatAnthropic(temperature=0, model_name="claude-3-haiku-20240307", api_key=settings.ANTHROPIC_API_KEY)
 logger = logging.getLogger(__name__)
 
 
@@ -185,6 +185,12 @@ class DocumentProcessingService:
         if not document:
             return False
 
+        await self.knowledge_service.refresh_document_knowledge(
+            document_id=document_id,
+            document_name=document.doc_name or "",
+            document_content="",
+        )
+
         existing_chunk_ids = await self.chunk_repository.get_chunk_ids_by_doc_id(document_id)
         if existing_chunk_ids:
             await self.vector_store.delete_vectors(
@@ -203,6 +209,7 @@ class DocumentProcessingService:
                     fallback=f"Delete document: {document.doc_name}",
                 )
                 await self.git_service.commit_changes(message=message, removed_paths=[file_path])
+            await self.project_summary_service.update_summary()
         return success
 
     async def _build_commit_message(
