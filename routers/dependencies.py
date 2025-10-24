@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from typing import List
+from typing import List, Optional
 
-from fastapi import Depends, HTTPException
+from fastapi import Depends, HTTPException, Header, status
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -12,6 +12,8 @@ from infrastructure.database.setup import (
     DEFAULT_USER_ID,
 )
 from infrastructure.context import ContextScope, RequestContextBundle
+from config import settings
+import hmac
 
 
 def _projects_to_csv(project_ids: List[int]) -> str:
@@ -48,3 +50,15 @@ async def get_request_context_bundle(
 
     scope = ContextScope(tenant_id=tenant_id, project_ids=project_ids, user_id=user_id)
     return RequestContextBundle(db=db, scope=scope)
+
+
+async def require_api_key(x_api_key: Optional[str] = Header(None, convert_underscores=False)) -> None:
+    expected = settings.API_AUTH_TOKEN
+    if not expected:
+        # No API key configured; allow all requests.
+        return
+    if not x_api_key or not hmac.compare_digest(x_api_key, expected):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or missing API key",
+        )

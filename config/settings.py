@@ -27,6 +27,7 @@ if DATABASE_URL is None:
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
 GIT_REPO_PATH = os.getenv("GIT_REPO_PATH")
 LLM_PROVIDER = os.getenv("LLM_PROVIDER", "anthropic").lower()
+API_AUTH_TOKEN = os.getenv("API_AUTH_TOKEN")
 
 # Embedding/vector configuration
 EMBEDDING_VECTOR_DIM = int(os.getenv("EMBEDDING_VECTOR_DIM", "768"))

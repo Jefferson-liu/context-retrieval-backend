@@ -1,4 +1,4 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, Depends
 from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
 import os
@@ -16,6 +16,8 @@ from infrastructure.database.setup import (
 from routers.document_router import router as document_router
 from routers.query_router import router as query_router
 from routers.knowledge_router import router as knowledge_router
+from routers.dependencies import require_api_key
+from config import settings
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -36,11 +38,18 @@ async def lifespan(app: FastAPI):
     # Shutdown (if needed)
 
 # Create FastAPI app
+docs_url = None if settings.API_AUTH_TOKEN else "/docs"
+redoc_url = None if settings.API_AUTH_TOKEN else "/redoc"
+openapi_url = None if settings.API_AUTH_TOKEN else "/openapi.json"
+
 app = FastAPI(
     title="Context Retrieval POC Backend",
     description="API for document upload, chunking, embedding, and search",
     version="1.0.0",
-    lifespan=lifespan
+    lifespan=lifespan,
+    docs_url=docs_url,
+    redoc_url=redoc_url,
+    openapi_url=openapi_url,
 )
 
 # Add CORS middleware
@@ -53,9 +62,42 @@ app.add_middleware(
 )
 
 # Include routers
-app.include_router(document_router, prefix="/api", tags=["Document"])
-app.include_router(query_router, prefix="/api", tags=["Query"])
-app.include_router(knowledge_router, prefix="/api", tags=["Knowledge"])
+app.include_router(
+    document_router,
+    prefix="/api",
+    tags=["Document"],
+    dependencies=[Depends(require_api_key)],
+)
+app.include_router(
+    query_router,
+    prefix="/api",
+    tags=["Query"],
+    dependencies=[Depends(require_api_key)],
+)
+app.include_router(
+    knowledge_router,
+    prefix="/api",
+    tags=["Knowledge"],
+    dependencies=[Depends(require_api_key)],
+)
+
+if settings.API_AUTH_TOKEN:
+    from fastapi.openapi.docs import get_swagger_ui_html
+    from fastapi.openapi.utils import get_openapi
+    from fastapi.responses import JSONResponse
+
+    @app.get("/openapi.json", include_in_schema=False, dependencies=[Depends(require_api_key)])
+    async def protected_openapi():
+        return JSONResponse(get_openapi(
+            title=app.title,
+            version=app.version,
+            routes=app.routes,
+            description=app.description,
+        ))
+
+    @app.get("/docs", include_in_schema=False, dependencies=[Depends(require_api_key)])
+    async def protected_swagger():
+        return get_swagger_ui_html(openapi_url="/openapi.json", title=f"{app.title} - Docs")
 
 # Health check
 @app.get("/health")
