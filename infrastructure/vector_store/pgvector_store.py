@@ -67,6 +67,7 @@ class PgVectorStore(VectorStoreGateway):
         *,
         tenant_id: int,
         project_ids: Sequence[int],
+        user_id: str,
         top_k: int = 10,
     ) -> Sequence[VectorSearchResult]:
         stmt = (
@@ -84,6 +85,7 @@ class PgVectorStore(VectorStoreGateway):
                 Embedding.embedding.isnot(None),
                 Chunk.tenant_id == tenant_id,
                 Chunk.project_id.in_(project_ids),
+                Document.created_by_user_id == user_id,
             )
             .order_by(Embedding.embedding.cosine_distance(query_embedding))
             .limit(top_k)
@@ -102,3 +104,5 @@ class PgVectorStore(VectorStoreGateway):
             )
             for row in rows
         ]
+
+

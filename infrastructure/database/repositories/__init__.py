@@ -10,6 +10,8 @@ from .knowledge_repository import (
 )
 from .document_summary_repository import DocumentSummaryRepository
 from .project_summary_repository import ProjectSummaryRepository
+from .user_product_repository import AppUserRepository, UserProductRepository
+from .user_project_role_repository import UserProjectRoleRepository
 
 __all__ = [
     "DocumentRepository",
@@ -22,4 +24,7 @@ __all__ = [
     "KnowledgeRelationshipMetadataRepository",
     "DocumentSummaryRepository",
     "ProjectSummaryRepository",
+    "AppUserRepository",
+    "UserProductRepository",
+    "UserProjectRoleRepository",
 ]

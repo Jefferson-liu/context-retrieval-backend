@@ -16,6 +16,7 @@ from infrastructure.database.setup import (
 from routers.document_router import router as document_router
 from routers.query_router import router as query_router
 from routers.knowledge_router import router as knowledge_router
+from routers.user_router import router as user_router
 from routers.dependencies import require_api_key
 from config import settings
 
@@ -78,6 +79,12 @@ app.include_router(
     knowledge_router,
     prefix="/api",
     tags=["Knowledge"],
+    dependencies=[Depends(require_api_key)],
+)
+app.include_router(
+    user_router,
+    prefix="/api",
+    tags=["User"],
     dependencies=[Depends(require_api_key)],
 )
 

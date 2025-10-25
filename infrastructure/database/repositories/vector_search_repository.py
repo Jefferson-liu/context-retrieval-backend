@@ -15,6 +15,7 @@ class SearchRepository:
             query_vector,
             tenant_id=self.context.tenant_id,
             project_ids=self.context.project_ids,
+            user_id=self.context.user_id,
             top_k=top_k,
         )
     

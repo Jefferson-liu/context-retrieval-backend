@@ -159,7 +159,7 @@ class MilvusVectorStore(VectorStoreGateway):
         )
 
         chunk_ids = [chunk_id for chunk_id, _ in hits]
-        chunk_rows = await self._fetch_chunks(chunk_ids)
+        chunk_rows = await self._fetch_chunks(chunk_ids, user_id=user_id)
 
         return [
             VectorSearchResult(
@@ -178,7 +178,7 @@ class MilvusVectorStore(VectorStoreGateway):
         project_clause = ", ".join(str(pid) for pid in project_ids)
         return f"tenant_id == {tenant_id} && project_id in [{project_clause}]"
 
-    async def _fetch_chunks(self, chunk_ids: Sequence[int]) -> Dict[int, Any]:
+    async def _fetch_chunks(self, chunk_ids: Sequence[int], *, user_id: str) -> Dict[int, Any]:
         if not chunk_ids:
             return {}
 
@@ -191,9 +191,13 @@ class MilvusVectorStore(VectorStoreGateway):
                 Document.doc_name,
             )
             .join(Document, Chunk.doc_id == Document.id)
-            .where(Chunk.id.in_(chunk_ids))
+            .where(Chunk.id.in_(chunk_ids), Document.created_by_user_id == user_id)
         )
 
         result = await self.db.execute(stmt)
         rows = result.mappings().all()
         return {row["id"]: row for row in rows}
+
+
+
+

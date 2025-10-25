@@ -37,6 +37,7 @@ class VectorStoreGateway(Protocol):
         *,
         tenant_id: int,
         project_ids: Sequence[int],
+        user_id: str,
         top_k: int = 10,
     ) -> Sequence[VectorSearchResult]:
         """Perform similarity search constrained to the supplied scope."""

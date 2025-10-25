@@ -43,6 +43,7 @@ class DocumentRepository:
             Document.id == doc_id,
             Document.tenant_id == self.context.tenant_id,
             Document.project_id.in_(self.context.project_ids),
+            Document.created_by_user_id == self.context.user_id,
         )
         result = await self.db.execute(stmt)
         document = result.scalar_one_or_none()
@@ -58,26 +59,29 @@ class DocumentRepository:
         stmt = select(Document).where(
             Document.tenant_id == self.context.tenant_id,
             Document.project_id.in_(self.context.project_ids),
+            Document.created_by_user_id == self.context.user_id,
         )
         result = await self.db.execute(stmt)
         return result.scalars().all()
-    
+
     async def get_document_by_id(self, document_id: int) -> Optional[Document]:
         """Get a single document by ID"""
         stmt = select(Document).where(
             Document.id == document_id,
             Document.tenant_id == self.context.tenant_id,
             Document.project_id.in_(self.context.project_ids),
+            Document.created_by_user_id == self.context.user_id,
         )
         result = await self.db.execute(stmt)
         return result.scalar_one_or_none()
-    
+
     async def delete_document(self, document_id: int) -> bool:
         """Delete a document by ID"""
         stmt = select(Document).where(
             Document.id == document_id,
             Document.tenant_id == self.context.tenant_id,
             Document.project_id.in_(self.context.project_ids),
+            Document.created_by_user_id == self.context.user_id,
         )
         result = await self.db.execute(stmt)
         document = result.scalar_one_or_none()

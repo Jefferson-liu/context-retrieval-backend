@@ -47,6 +47,7 @@ class ChunkRepository:
                 Chunk.doc_id == doc_id,
                 Chunk.tenant_id == self.context.tenant_id,
                 Chunk.project_id.in_(self.context.project_ids),
+                Chunk.created_by_user_id == self.context.user_id,
             )
             .order_by(Chunk.chunk_order.asc(), Chunk.id.asc())
         )
@@ -59,16 +60,18 @@ class ChunkRepository:
             Chunk.doc_id == doc_id,
             Chunk.tenant_id == self.context.tenant_id,
             Chunk.project_id.in_(self.context.project_ids),
+            Chunk.created_by_user_id == self.context.user_id,
         )
         result = await self.db.execute(stmt)
         return [row[0] for row in result.all()]
-    
+
     async def get_chunk_by_id(self, chunk_id: int) -> Optional[Chunk]:
         """Fetch a single chunk scoped to the current tenant/projects."""
         stmt = select(Chunk).where(
             Chunk.id == chunk_id,
             Chunk.tenant_id == self.context.tenant_id,
             Chunk.project_id.in_(self.context.project_ids),
+            Chunk.created_by_user_id == self.context.user_id,
         )
         result = await self.db.execute(stmt)
         return result.scalar_one_or_none()
@@ -85,6 +88,10 @@ class ChunkRepository:
 
     async def update_embedding(self, chunk_id: int, **kwargs) -> Optional[Embedding]:
         """Update the embedding for an existing record"""
+        chunk = await self.get_chunk_by_id(chunk_id)
+        if not chunk:
+            return None
+
         stmt = select(Embedding).where(
             Embedding.chunk_id == chunk_id,
             Embedding.tenant_id == self.context.tenant_id,
@@ -100,6 +107,10 @@ class ChunkRepository:
     
     async def get_embedding_by_chunk_id(self, chunk_id: int) -> Optional[Embedding]:
         """Get a single embedding by chunk ID"""
+        chunk = await self.get_chunk_by_id(chunk_id)
+        if not chunk:
+            return None
+
         stmt = select(Embedding).where(
             Embedding.chunk_id == chunk_id,
             Embedding.tenant_id == self.context.tenant_id,
@@ -119,6 +130,7 @@ class ChunkRepository:
             .where(
                 Chunk.tenant_id == self.context.tenant_id,
                 Chunk.project_id.in_(self.context.project_ids),
+                Chunk.created_by_user_id == self.context.user_id,
             )
         )
         result = await self.db.execute(stmt)
@@ -130,6 +142,7 @@ class ChunkRepository:
             Chunk.id == chunk_id,
             Chunk.tenant_id == self.context.tenant_id,
             Chunk.project_id.in_(self.context.project_ids),
+            Chunk.created_by_user_id == self.context.user_id,
         )
         result = await self.db.execute(stmt)
         chunk = result.scalar_one_or_none()
@@ -145,6 +158,7 @@ class ChunkRepository:
             Chunk.doc_id == doc_id,
             Chunk.tenant_id == self.context.tenant_id,
             Chunk.project_id.in_(self.context.project_ids),
+            Chunk.created_by_user_id == self.context.user_id,
         )
         result = await self.db.execute(stmt)
         chunks = result.scalars().all()
@@ -161,6 +175,7 @@ class ChunkRepository:
             Chunk.id == chunk_id,
             Chunk.tenant_id == self.context.tenant_id,
             Chunk.project_id.in_(self.context.project_ids),
+            Chunk.created_by_user_id == self.context.user_id,
         )
         result = await self.db.execute(stmt)
         row = result.scalar_one_or_none()

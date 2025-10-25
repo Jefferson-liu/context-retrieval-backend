@@ -6,7 +6,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from infrastructure.context import ContextScope
-from infrastructure.database.models.documents import DocumentSummary
+from infrastructure.database.models.documents import DocumentSummary, Document
 
 
 class DocumentSummaryRepository:
@@ -49,10 +49,15 @@ class DocumentSummaryRepository:
 
     async def get_by_document_id(self, document_id: int) -> Optional[DocumentSummary]:
         """Fetch the summary for a document constrained to the current scope."""
-        stmt = select(DocumentSummary).where(
-            DocumentSummary.document_id == document_id,
-            DocumentSummary.tenant_id == self.context.tenant_id,
-            DocumentSummary.project_id.in_(self.context.project_ids),
+        stmt = (
+            select(DocumentSummary)
+            .join(Document, Document.id == DocumentSummary.document_id)
+            .where(
+                DocumentSummary.document_id == document_id,
+                DocumentSummary.tenant_id == self.context.tenant_id,
+                DocumentSummary.project_id.in_(self.context.project_ids),
+                Document.created_by_user_id == self.context.user_id,
+            )
         )
         result = await self.db.execute(stmt)
         return result.scalar_one_or_none()
@@ -63,10 +68,15 @@ class DocumentSummaryRepository:
         if not ids:
             return []
 
-        stmt = select(DocumentSummary).where(
-            DocumentSummary.document_id.in_(ids),
-            DocumentSummary.tenant_id == self.context.tenant_id,
-            DocumentSummary.project_id.in_(self.context.project_ids),
+        stmt = (
+            select(DocumentSummary)
+            .join(Document, Document.id == DocumentSummary.document_id)
+            .where(
+                DocumentSummary.document_id.in_(ids),
+                DocumentSummary.tenant_id == self.context.tenant_id,
+                DocumentSummary.project_id.in_(self.context.project_ids),
+                Document.created_by_user_id == self.context.user_id,
+            )
         )
         result = await self.db.execute(stmt)
         return result.scalars().all()
