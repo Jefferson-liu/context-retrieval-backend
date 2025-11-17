@@ -32,12 +32,14 @@ class GitService:
 
         if not self._repo_path:
             logger.warning("GIT_REPO_PATH is not configured; git commits will be skipped.")
+            print("GIT_REPO_PATH is not configured; git commits will be skipped.")
             return
 
         try:
             self._repo = pygit2.Repository(str(self._repo_path))
         except (pygit2.GitError, ValueError) as exc:
             logger.error("Failed to open git repository at %s: %s", self._repo_path, exc)
+            print("Failed to open git repository at %s: %s" % (self._repo_path, exc))
             self._repo = None
 
     @property
@@ -89,11 +91,13 @@ class GitService:
                 index.remove(rel_path)
             except KeyError:
                 logger.debug("Skipping removal for %s; not tracked in index", path)
+                print("Skipping removal for %s; not tracked in index" % path)
 
         for path in added_paths:
             rel_path = self._relativize(path)
             if not path.exists():
                 logger.warning("Cannot add %s because it does not exist on disk", path)
+                print("Cannot add %s because it does not exist on disk" % path)
                 continue
             index.add(rel_path)
 
@@ -106,11 +110,13 @@ class GitService:
             parents.append(head_commit.id)
             if head_commit.tree_id == tree_oid:
                 logger.debug("No staged changes detected; skipping commit")
+                print("No staged changes detected; skipping commit")
                 return False
 
         author = _get_signature()
         self._repo.create_commit("HEAD", author, author, message, tree_oid, parents)
         logger.info("Created git commit: %s", message)
+        print("Created git commit: %s" % message)
         return True
 
     def _relativize(self, path: Path) -> str:

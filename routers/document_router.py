@@ -1,12 +1,16 @@
+import logging
 from fastapi import APIRouter, UploadFile, File, Depends, HTTPException
 from services.document.processing import DocumentProcessingService
 from services.document.chunk_editing import ChunkEditingService
 from services.document.retrieval import DocumentRetrievalService
+from services.text_thread.text_thread_service import TextThreadService
 from infrastructure.context import RequestContextBundle
 from routers.dependencies import get_request_context_bundle
 from schemas.requests import EditDocumentRequest, EditChunkRequest
+from schemas.requests.text_thread import UploadTextThreadRequest
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 @router.post("/upload", summary="Upload and process a document")
 async def upload_document(
@@ -25,7 +29,7 @@ async def upload_document(
         text_content = content.decode("utf-8")
 
         service = DocumentProcessingService(context_bundle.db, context_bundle.scope)
-        doc_id = await service.upload_and_process_document(
+        result = await service.upload_and_process_document(
             content=text_content,
             doc_name=file.filename,
             doc_type=file.content_type or "text/plain"
@@ -33,10 +37,13 @@ async def upload_document(
         
         return {
             "message": "Document uploaded and processed successfully",
-            "doc_id": doc_id,
-            "chunks_created": len(text_content) // 512  # Approximate
+            "doc_id": result.get("doc_id"),
+            "chunks_created": len(text_content) // 512,  # Approximate
+            "knowledge_result": result.get("knowledge_result", {}),
         }
     except Exception as e:
+        logger.exception("Upload failed for filename=%s: %s", file.filename, e)
+        print("Upload failed for filename=%s: %s" % (file.filename, e))
         raise HTTPException(status_code=500, detail=f"Upload failed: {str(e)}")
 
 @router.get("/documents", summary="List all documents")
@@ -115,4 +122,22 @@ async def edit_chunk(
         "chunk_id": chunk.id,
         "content": chunk.content,
         "context": chunk.context,
+    }
+
+
+@router.post("/upload/text-thread", summary="Upload a text thread and extract knowledge")
+async def upload_text_thread(
+    payload: UploadTextThreadRequest,
+    context_bundle: RequestContextBundle = Depends(get_request_context_bundle),
+):
+    service = TextThreadService(context_bundle.db, context_bundle.scope)
+    result = await service.upload_text_thread(
+        title=payload.title,
+        source_system=payload.source_system,
+        external_thread_id=payload.external_thread_id,
+        messages=[msg.dict() for msg in payload.messages] if payload.messages else None,
+    )
+    return {
+        "message": "Thread uploaded and processed successfully",
+        **result,
     }

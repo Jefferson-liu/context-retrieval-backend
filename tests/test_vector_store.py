@@ -174,6 +174,7 @@ def test_pgvector_store_respects_scope():
                 default_embedding,
                 tenant_id=default_scope.tenant_id,
                 project_ids=default_scope.project_ids,
+                user_id=default_scope.user_id,
                 top_k=5,
             )
 

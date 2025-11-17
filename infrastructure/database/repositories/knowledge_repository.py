@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import List, Optional, Sequence
+from typing import Dict, List, Optional, Sequence
 
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from infrastructure.context import ContextScope
 from infrastructure.database.models.knowledge import (
     KnowledgeEntity,
+    KnowledgeEntityAlias,
     KnowledgeRelationship,
     KnowledgeRelationshipMetadata,
 )
@@ -26,6 +27,9 @@ class KnowledgeEntityRepository:
         name: str,
         entity_type: str,
         description: Optional[str] = None,
+        canonical_name: str,
+        event_id: Optional[str] = None,
+        resolved_id: Optional[int] = None,
     ) -> KnowledgeEntity:
         entity = KnowledgeEntity(
             tenant_id=self.context.tenant_id,
@@ -33,6 +37,9 @@ class KnowledgeEntityRepository:
             name=name,
             entity_type=entity_type,
             description=description,
+            canonical_name=canonical_name,
+            event_id=event_id,
+            resolved_id=resolved_id,
         )
         self.db.add(entity)
         await self.db.flush()
@@ -62,6 +69,21 @@ class KnowledgeEntityRepository:
         result = await self.db.execute(stmt)
         return result.scalar_one_or_none()
 
+    async def get_entity_by_canonical_name(
+        self,
+        *,
+        canonical_name: str,
+        entity_type: str,
+    ) -> Optional[KnowledgeEntity]:
+        stmt = select(KnowledgeEntity).where(
+            KnowledgeEntity.canonical_name == canonical_name,
+            KnowledgeEntity.entity_type == entity_type,
+            KnowledgeEntity.tenant_id == self.context.tenant_id,
+            KnowledgeEntity.project_id.in_(self.context.project_ids),
+        )
+        result = await self.db.execute(stmt)
+        return result.scalar_one_or_none()
+
     async def list_entities(
         self,
         *,
@@ -78,6 +100,23 @@ class KnowledgeEntityRepository:
         result = await self.db.execute(stmt)
         return result.scalars().all()
 
+    async def list_entities_by_ids(
+        self,
+        entity_ids: Sequence[int],
+    ) -> Dict[int, KnowledgeEntity]:
+        unique_ids = {entity_id for entity_id in entity_ids if entity_id}
+        if not unique_ids:
+            return {}
+
+        stmt = select(KnowledgeEntity).where(
+            KnowledgeEntity.id.in_(unique_ids),
+            KnowledgeEntity.tenant_id == self.context.tenant_id,
+            KnowledgeEntity.project_id.in_(self.context.project_ids),
+        )
+        result = await self.db.execute(stmt)
+        rows = result.scalars().all()
+        return {row.id: row for row in rows}
+
     async def update_entity(
         self,
         entity_id: int,
@@ -85,6 +124,9 @@ class KnowledgeEntityRepository:
         name: Optional[str] = None,
         entity_type: Optional[str] = None,
         description: Optional[str] = None,
+        canonical_name: Optional[str] = None,
+        event_id: Optional[str] = None,
+        resolved_id: Optional[int] = None,
     ) -> Optional[KnowledgeEntity]:
         entity = await self.get_entity_by_id(entity_id)
         if not entity:
@@ -96,6 +138,12 @@ class KnowledgeEntityRepository:
             entity.entity_type = entity_type
         if description is not None:
             entity.description = description
+        if canonical_name is not None:
+            entity.canonical_name = canonical_name
+        if event_id is not None:
+            entity.event_id = event_id
+        if resolved_id is not None:
+            entity.resolved_id = resolved_id
 
         await self.db.flush()
         return entity
@@ -187,6 +235,25 @@ class KnowledgeRelationshipRepository:
         if relationship_type:
             stmt = stmt.where(KnowledgeRelationship.relationship_type == relationship_type)
 
+        result = await self.db.execute(stmt)
+        return result.scalars().all()
+
+    async def list_relationships_for_entities(
+        self,
+        entity_ids: Sequence[int],
+    ) -> List[KnowledgeRelationship]:
+        unique_ids = {entity_id for entity_id in entity_ids if entity_id}
+        if not unique_ids:
+            return []
+
+        stmt = select(KnowledgeRelationship).where(
+            KnowledgeRelationship.tenant_id == self.context.tenant_id,
+            KnowledgeRelationship.project_id.in_(self.context.project_ids),
+            or_(
+                KnowledgeRelationship.source_entity_id.in_(unique_ids),
+                KnowledgeRelationship.target_entity_id.in_(unique_ids),
+            ),
+        )
         result = await self.db.execute(stmt)
         return result.scalars().all()
 
@@ -348,3 +415,97 @@ class KnowledgeRelationshipMetadataRepository:
         await self.db.delete(metadata_entry)
         await self.db.flush()
         return True
+
+    async def get_metadata_map_for_relationships(
+        self,
+        relationship_ids: Sequence[int],
+        *,
+        key: Optional[str] = None,
+    ) -> Dict[int, KnowledgeRelationshipMetadata]:
+        unique_ids = {rel_id for rel_id in relationship_ids if rel_id}
+        if not unique_ids:
+            return {}
+
+        stmt = select(KnowledgeRelationshipMetadata).where(
+            KnowledgeRelationshipMetadata.relationship_id.in_(unique_ids),
+            KnowledgeRelationshipMetadata.tenant_id == self.context.tenant_id,
+            KnowledgeRelationshipMetadata.project_id.in_(self.context.project_ids),
+        )
+        if key:
+            stmt = stmt.where(KnowledgeRelationshipMetadata.key == key)
+
+        result = await self.db.execute(stmt)
+        rows = result.scalars().all()
+        return {row.relationship_id: row for row in rows}
+
+
+class KnowledgeEntityAliasRepository:
+    """Repository helpers for knowledge entity alias mappings."""
+
+    def __init__(self, db: AsyncSession, context: ContextScope) -> None:
+        self.db = db
+        self.context = context
+
+    async def get_entity_by_alias(
+        self,
+        *,
+        alias_canonical_name: str,
+        entity_type: str,
+    ) -> Optional[KnowledgeEntity]:
+        stmt = (
+            select(KnowledgeEntity)
+            .join(KnowledgeEntityAlias, KnowledgeEntityAlias.entity_id == KnowledgeEntity.id)
+            .where(
+                KnowledgeEntityAlias.alias_canonical_name == alias_canonical_name,
+                KnowledgeEntityAlias.entity_type == entity_type,
+                KnowledgeEntity.entity_type == entity_type,
+                KnowledgeEntity.tenant_id == self.context.tenant_id,
+                KnowledgeEntity.project_id.in_(self.context.project_ids),
+            )
+        )
+        result = await self.db.execute(stmt)
+        return result.scalar_one_or_none()
+
+    async def ensure_alias(
+        self,
+        *,
+        entity_id: int,
+        entity_type: str,
+        alias_name: str,
+        alias_canonical_name: str,
+    ) -> KnowledgeEntityAlias:
+        stmt = select(KnowledgeEntityAlias).where(
+            KnowledgeEntityAlias.entity_id == entity_id,
+            KnowledgeEntityAlias.alias_canonical_name == alias_canonical_name,
+            KnowledgeEntityAlias.entity_type == entity_type,
+            KnowledgeEntityAlias.tenant_id == self.context.tenant_id,
+            KnowledgeEntityAlias.project_id.in_(self.context.project_ids),
+        )
+        result = await self.db.execute(stmt)
+        alias = result.scalar_one_or_none()
+        if alias:
+            if alias.alias_name != alias_name:
+                alias.alias_name = alias_name
+                await self.db.flush()
+            return alias
+
+        alias = KnowledgeEntityAlias(
+            tenant_id=self.context.tenant_id,
+            project_id=self.context.primary_project(),
+            entity_id=entity_id,
+            entity_type=entity_type,
+            alias_name=alias_name,
+            alias_canonical_name=alias_canonical_name,
+        )
+        self.db.add(alias)
+        await self.db.flush()
+        return alias
+
+    async def list_aliases_for_entity(self, entity_id: int) -> List[KnowledgeEntityAlias]:
+        stmt = select(KnowledgeEntityAlias).where(
+            KnowledgeEntityAlias.entity_id == entity_id,
+            KnowledgeEntityAlias.tenant_id == self.context.tenant_id,
+            KnowledgeEntityAlias.project_id.in_(self.context.project_ids),
+        )
+        result = await self.db.execute(stmt)
+        return result.scalars().all()

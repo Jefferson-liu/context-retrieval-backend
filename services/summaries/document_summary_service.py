@@ -8,6 +8,8 @@ from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, System
 from infrastructure.context import ContextScope
 from infrastructure.database.models.documents import DocumentSummary
 from infrastructure.database.repositories.document_summary_repository import DocumentSummaryRepository
+from infrastructure.ai.model_factory import build_chat_model
+from config.settings import DOCUMENT_SUMMARIZATION_MODEL
 
 
 class DocumentSummaryService:
@@ -17,13 +19,11 @@ class DocumentSummaryService:
         self,
         db: AsyncSession,
         context: ContextScope,
-        llm: BaseChatModel,
-        *,
         document_summary_repository: DocumentSummaryRepository | None = None,
     ):
         self.db = db
         self.context = context
-        self.llm = llm
+        self.llm = build_chat_model(model_name=DOCUMENT_SUMMARIZATION_MODEL)
         self.document_summaries = document_summary_repository or DocumentSummaryRepository(db, context)
 
     async def upsert_summary(

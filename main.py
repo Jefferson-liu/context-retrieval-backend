@@ -2,6 +2,7 @@ from fastapi import FastAPI, Depends
 from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
 import os
+import logging
 from contextlib import asynccontextmanager
 from sqlalchemy import text
 
@@ -19,6 +20,16 @@ from routers.knowledge_router import router as knowledge_router
 from routers.user_router import router as user_router
 from routers.dependencies import require_api_key
 from config import settings
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s %(name)s %(message)s",
+    force=True,  # override any existing handlers (e.g., uvicorn defaults)
+)
+logging.getLogger("sqlalchemy.engine").setLevel(logging.WARNING)
+# Ensure our service loggers emit at INFO even if other configs override defaults.
+logging.getLogger("services").setLevel(logging.INFO)
+logging.getLogger("services.knowledge").setLevel(logging.INFO)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):

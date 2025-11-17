@@ -39,9 +39,10 @@ async def configure_multi_tenant_rls(conn: AsyncConnection) -> None:
         "knowledge_entities",
         "knowledge_relationships",
         "knowledge_relationship_metadata",
+        "knowledge_statements",
+        "knowledge_statement_triplets",
         "document_summaries",
         "project_summaries",
-        "app_users",
         "user_products",
     ]
 

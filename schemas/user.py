@@ -5,11 +5,6 @@ from typing import List, Optional
 from pydantic import BaseModel, Field
 
 
-class UserCreateRequest(BaseModel):
-    user_id: str = Field(..., description="External identifier for the user")
-    name: Optional[str] = Field(None, description="Display name for the user")
-
-
 class ProductCreateRequest(BaseModel):
     product_id: str = Field(..., description="External identifier for the product")
     name: Optional[str] = Field(None, description="Display name for the product")

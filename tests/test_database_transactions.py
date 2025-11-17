@@ -146,7 +146,7 @@ def test_sources_retain_history_when_document_deleted():
             user_id = "history-tester"
 
             await session.execute(
-                text("SELECT set_app_content(:tenant_id, :project_ids)"),
+                text("SELECT set_app_context(:tenant_id, :project_ids)"),
                 {
                     "tenant_id": tenant_id,
                     "project_ids": str(project_id),

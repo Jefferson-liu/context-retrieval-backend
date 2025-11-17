@@ -101,6 +101,7 @@ async def test_search_returns_ordered_results(monkeypatch: pytest.MonkeyPatch) -
         [0.1, 0.2],
         tenant_id=1,
         project_ids=[101, 102],
+        user_id="user-123",
         top_k=5,
     )
 

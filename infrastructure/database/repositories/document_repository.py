@@ -1,4 +1,4 @@
-from typing import List, Optional
+from typing import Dict, List, Optional, Sequence
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from infrastructure.context import ContextScope
@@ -74,6 +74,22 @@ class DocumentRepository:
         )
         result = await self.db.execute(stmt)
         return result.scalar_one_or_none()
+
+    async def get_documents_by_ids(self, document_ids: Sequence[int]) -> Dict[int, Document]:
+        """Fetch multiple documents keyed by their ids."""
+        unique_ids = {doc_id for doc_id in document_ids if doc_id}
+        if not unique_ids:
+            return {}
+
+        stmt = select(Document).where(
+            Document.id.in_(unique_ids),
+            Document.tenant_id == self.context.tenant_id,
+            Document.project_id.in_(self.context.project_ids),
+            Document.created_by_user_id == self.context.user_id,
+        )
+        result = await self.db.execute(stmt)
+        rows = result.scalars().all()
+        return {doc.id: doc for doc in rows}
 
     async def delete_document(self, document_id: int) -> bool:
         """Delete a document by ID"""

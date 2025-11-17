@@ -10,7 +10,7 @@ from sqlalchemy import (
     Index,
 )
 from sqlalchemy.orm import relationship
-from datetime import datetime
+from datetime import datetime, timezone
 from pgvector.sqlalchemy import Vector
 from sqlalchemy.dialects.postgresql import ARRAY
 
@@ -26,7 +26,10 @@ class Document(Base):
     context = Column(Text)
     content = Column(Text)
     doc_size = Column(Integer)
-    upload_date = Column(DateTime, default=datetime.now())
+    upload_date = Column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+    )
     doc_type = Column(String)
     tenant_id = Column(Integer, ForeignKey("tenants.id", ondelete="RESTRICT"), nullable=False, index=True)
     project_id = Column(Integer, ForeignKey("projects.id", ondelete="RESTRICT"), nullable=False, index=True)
@@ -46,7 +49,10 @@ class Chunk(Base):
     chunk_order = Column(Integer)
     context = Column(Text)             # contextualized chunk text
     content = Column(Text)         # raw editable text
-    created_date = Column(DateTime, default=datetime.now())
+    created_date = Column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+    )
     tenant_id = Column(Integer, ForeignKey("tenants.id", ondelete="RESTRICT"), nullable=False, index=True)
     project_id = Column(Integer, ForeignKey("projects.id", ondelete="RESTRICT"), nullable=False, index=True)
     created_by_user_id = Column(String, nullable=False)
@@ -64,7 +70,10 @@ class Embedding(Base):
     chunk_id = Column(Integer, ForeignKey("chunks.id", ondelete="CASCADE"), primary_key=True)
 
     embedding = Column(Vector(settings.EMBEDDING_VECTOR_DIM))
-    created_date = Column(DateTime, default=datetime.now())
+    created_date = Column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+    )
     tenant_id = Column(Integer, ForeignKey("tenants.id", ondelete="RESTRICT"), nullable=False, index=True)
     project_id = Column(Integer, ForeignKey("projects.id", ondelete="RESTRICT"), nullable=False, index=True)
 
@@ -88,8 +97,17 @@ class DocumentSummary(Base):
     summary_tokens = Column(Integer, nullable=True)
     summary_hash = Column(String(64), nullable=True, unique=False)
     milvus_primary_key = Column(BigInteger, nullable=True, unique=False)
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+    created_at = Column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        nullable=False,
+    )
+    updated_at = Column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+        nullable=False,
+    )
 
     tenant = relationship(Tenant)
     project = relationship(Project)
@@ -116,9 +134,18 @@ class ProjectSummary(Base):
     summary_text = Column(Text, nullable=False)
     summary_tokens = Column(Integer, nullable=True)
     source_document_ids = Column(ARRAY(Integer), nullable=True)
-    refreshed_at = Column(DateTime, nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+    refreshed_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        nullable=False,
+    )
+    updated_at = Column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+        nullable=False,
+    )
 
     tenant = relationship(Tenant)
     project = relationship(Project)

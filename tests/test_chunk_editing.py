@@ -39,6 +39,53 @@ class FakeEmbedder:
         return [multiplier] * settings.EMBEDDING_VECTOR_DIM
 
 
+class FakeLLM:
+    """Minimal stub to satisfy optional LLM dependencies during testing."""
+
+    async def ainvoke(self, _messages):
+        return "stub-response"
+
+    def with_structured_output(self, _schema):
+        class _StructuredStub:
+            async def ainvoke(self, _inputs):
+                return _schema() if callable(_schema) else None
+
+        return _StructuredStub()
+
+
+class FakeDocumentSummaryService:
+    def __init__(self) -> None:
+        self.calls: list[tuple[int, str]] = []
+
+    async def upsert_summary(self, *, document_id: int, document_content: str, **_kwargs):
+        self.calls.append((document_id, document_content))
+        return None
+
+
+class FakeProjectSummaryService:
+    def __init__(self) -> None:
+        self.update_calls = 0
+
+    async def update_summary(self):
+        self.update_calls += 1
+        return None
+
+
+class FakeKnowledgeService:
+    def __init__(self) -> None:
+        self.refresh_calls: list[tuple[int, str, str]] = []
+
+    async def refresh_document_knowledge(
+        self,
+        *,
+        document_id: int,
+        document_name: str,
+        document_content: str,
+    ):
+        self.refresh_calls.append((document_id, document_name, document_content))
+        return None
+
+
 def test_chunk_editing_updates_chunk_and_embedding():
     async def workflow() -> None:
         await create_tables()
@@ -119,12 +166,20 @@ def test_chunk_editing_updates_chunk_and_embedding():
             await session.flush()
 
             embedder = FakeEmbedder()
+            fake_llm = FakeLLM()
+            fake_doc_summary = FakeDocumentSummaryService()
+            fake_project_summary = FakeProjectSummaryService()
+            fake_knowledge_service = FakeKnowledgeService()
             service = ChunkEditingService(
                 session,
                 scope,
                 embedder=embedder,
                 vector_store=vector_store,
+                summary_llm=fake_llm,
+                document_summary_service=fake_doc_summary,
+                project_summary_service=fake_project_summary,
             )
+            service.knowledge_service = fake_knowledge_service
 
             updated_chunk = await service.update_chunk(
                 chunk.id,
@@ -149,6 +204,12 @@ def test_chunk_editing_updates_chunk_and_embedding():
             stored_values = list(embedding_row.embedding)
             assert all(value == 1.0 for value in stored_values[:3]), stored_values[:3]
 
+            assert fake_knowledge_service.refresh_calls == [
+                (document.id, document.doc_name, expected_manual_body)
+            ]
+            assert fake_doc_summary.calls == [(document.id, expected_manual_body)]
+            assert fake_project_summary.update_calls == 1
+
             updated_chunk = await service.update_chunk(
                 chunk.id,
                 content="second content",
@@ -171,6 +232,16 @@ def test_chunk_editing_updates_chunk_and_embedding():
             assert embedding_row is not None
             stored_values = list(embedding_row.embedding)
             assert all(value == 2.0 for value in stored_values[:3]), stored_values[:3]
+
+            assert fake_knowledge_service.refresh_calls == [
+                (document.id, document.doc_name, expected_manual_body),
+                (document.id, document.doc_name, expected_second_body),
+            ]
+            assert fake_doc_summary.calls == [
+                (document.id, expected_manual_body),
+                (document.id, expected_second_body),
+            ]
+            assert fake_project_summary.update_calls == 2
 
         finally:
             try:

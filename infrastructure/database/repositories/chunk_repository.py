@@ -1,4 +1,4 @@
-from typing import List, Optional, Tuple
+from typing import Dict, List, Optional, Sequence, Tuple
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from infrastructure.context import ContextScope
@@ -75,6 +75,22 @@ class ChunkRepository:
         )
         result = await self.db.execute(stmt)
         return result.scalar_one_or_none()
+
+    async def get_chunks_by_ids(self, chunk_ids: Sequence[int]) -> Dict[int, Chunk]:
+        """Fetch multiple chunks in a single query, keyed by chunk id."""
+        unique_ids = {chunk_id for chunk_id in chunk_ids if chunk_id}
+        if not unique_ids:
+            return {}
+
+        stmt = select(Chunk).where(
+            Chunk.id.in_(unique_ids),
+            Chunk.tenant_id == self.context.tenant_id,
+            Chunk.project_id.in_(self.context.project_ids),
+            Chunk.created_by_user_id == self.context.user_id,
+        )
+        result = await self.db.execute(stmt)
+        rows = result.scalars().all()
+        return {chunk.id: chunk for chunk in rows}
 
     async def edit_chunk(self, chunk_id: int, **kwargs) -> Optional[Chunk]:
         """Edit an existing chunk record"""

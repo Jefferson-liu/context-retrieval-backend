@@ -11,10 +11,7 @@ from infrastructure.database.database import get_db
 from infrastructure.database.repositories.user_project_role_repository import (
     UserProjectRoleRepository,
 )
-from infrastructure.database.repositories.user_product_repository import (
-    AppUserRepository,
-    UserProductRepository,
-)
+from infrastructure.database.repositories.user_product_repository import UserProductRepository
 from infrastructure.database.models.tenancy import Project, Tenant
 from infrastructure.database.setup import (
     DEFAULT_PROJECT_SLUG,
@@ -34,6 +31,9 @@ async def get_request_context_bundle(
     user_id_header: Optional[str] = Header(None, alias="user_id"),
     project_id_header: Optional[str] = Header(None, alias="project_id"),
 ) -> RequestContextBundle:
+    dev_bundle = await _maybe_dev_context_bundle(db, user_id_header, project_id_header)
+    if dev_bundle:
+        return dev_bundle
     return await _resolve_context(
         db=db,
         user_id_header=user_id_header,
@@ -47,6 +47,9 @@ async def get_admin_context_bundle(
     user_id_header: Optional[str] = Header(None, alias="user_id"),
     project_id_header: Optional[str] = Header(None, alias="project_id"),
 ) -> RequestContextBundle:
+    dev_bundle = await _maybe_dev_context_bundle(db, user_id_header, project_id_header)
+    if dev_bundle:
+        return dev_bundle
     return await _resolve_context(
         db=db,
         user_id_header=user_id_header,
@@ -132,25 +135,15 @@ async def _resolve_context(
     else:
         project_ids = list({role.project_id for role in roles})
 
-    owner_repo = AppUserRepository(db)
     product_repo = UserProductRepository(db)
-    user_owner = await owner_repo.get_by_external_id(tenant_id=tenant_id, external_id=user_id)
 
     if not allow_missing_roles:
         for project_id in project_ids:
-            owner = await owner_repo.get_by_project_id(tenant_id=tenant_id, project_id=project_id)
-            if owner:
-                if owner.external_id != user_id:
-                    raise HTTPException(status_code=403, detail="Product is owned by another user")
-                continue
-
             product = await product_repo.get_by_project_id(tenant_id=tenant_id, project_id=project_id)
             if product:
-                if not user_owner or product.user_id != user_owner.id:
+                if product.owner_external_id != user_id:
                     raise HTTPException(status_code=403, detail="Product is owned by another user")
                 continue
-
-            raise HTTPException(status_code=403, detail="Product has no associated owner")
 
     await db.execute(
         text("SELECT set_app_context(:tenant_id, :project_ids)"),
@@ -176,3 +169,24 @@ async def require_api_key(x_api_key: Optional[str] = Header(None, alias="X-API-K
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid or missing API key",
         )
+
+
+async def _maybe_dev_context_bundle(
+    db: AsyncSession,
+    user_id_header: Optional[str],
+    project_id_header: Optional[str],
+) -> Optional[RequestContextBundle]:
+    if not settings.IS_DEV_MODE:
+        return None
+
+    normalized_user = user_id_header.strip() if user_id_header else None
+    if normalized_user and normalized_user != settings.DEV_PLACEHOLDER_USER_ID:
+        return None
+
+    if project_id_header:
+        return None
+
+    from services.dev.placeholders import DevPlaceholderBootstrapper
+
+    bootstrapper = DevPlaceholderBootstrapper(db)
+    return await bootstrapper.build_context_bundle()

@@ -1,5 +1,5 @@
-from typing import List, Optional
-from sqlalchemy import select
+from typing import Any, List, Optional, Sequence
+from sqlalchemy import select, insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from infrastructure.context import ContextScope
 from infrastructure.database.models.queries import Query, Response, Source
@@ -99,6 +99,27 @@ class QueryRepository:
         self.db.add(new_source)
         # Don't commit here
         return new_source
+
+    async def add_sources_bulk(self, response_id: int, payloads: Sequence[dict[str, Any]]) -> None:
+        """Bulk insert sources for a response."""
+        if not payloads:
+            return
+
+        values = [
+            {
+                "response_id": response_id,
+                "chunk_id": payload.get("chunk_id"),
+                "doc_id": payload.get("doc_id"),
+                "doc_name": payload.get("doc_name"),
+                "snippet": payload.get("snippet"),
+                "tenant_id": self.context.tenant_id,
+                "project_id": self.context.primary_project(),
+            }
+            for payload in payloads
+        ]
+
+        stmt = insert(Source).values(values)
+        await self.db.execute(stmt)
     
     async def get_response_by_query_id(self, query_id: int) -> Optional[Response]:
         """Retrieve the response associated with a specific query ID"""

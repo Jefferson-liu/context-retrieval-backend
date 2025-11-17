@@ -7,10 +7,16 @@ from .knowledge_repository import (
     KnowledgeEntityRepository,
     KnowledgeRelationshipRepository,
     KnowledgeRelationshipMetadataRepository,
+    KnowledgeEntityAliasRepository,
+)
+from .knowledge_temporal_repository import (
+    KnowledgeStatementRepository,
+    KnowledgeStatementTripletRepository,
+    KnowledgeStatementInvalidationRepository,
 )
 from .document_summary_repository import DocumentSummaryRepository
 from .project_summary_repository import ProjectSummaryRepository
-from .user_product_repository import AppUserRepository, UserProductRepository
+from .user_product_repository import UserProductRepository
 from .user_project_role_repository import UserProjectRoleRepository
 
 __all__ = [
@@ -22,9 +28,12 @@ __all__ = [
     "KnowledgeEntityRepository",
     "KnowledgeRelationshipRepository",
     "KnowledgeRelationshipMetadataRepository",
+    "KnowledgeEntityAliasRepository",
+    "KnowledgeStatementRepository",
+    "KnowledgeStatementTripletRepository",
+    "KnowledgeStatementInvalidationRepository",
     "DocumentSummaryRepository",
     "ProjectSummaryRepository",
-    "AppUserRepository",
     "UserProductRepository",
     "UserProjectRoleRepository",
 ]

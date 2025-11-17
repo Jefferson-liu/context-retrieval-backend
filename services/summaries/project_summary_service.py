@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Iterable, Optional, Sequence, List
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -11,7 +11,8 @@ from infrastructure.context import ContextScope
 from infrastructure.database.models.documents import ProjectSummary
 from infrastructure.database.repositories import DocumentRepository, DocumentSummaryRepository
 from infrastructure.database.repositories.project_summary_repository import ProjectSummaryRepository
-
+from infrastructure.ai.model_factory import build_chat_model
+from config.settings import PROJECT_SUMMARIZATION_MODEL
 
 class ProjectSummaryService:
     """Manages the lifecycle of tenant/project-scoped summary aggregates."""
@@ -20,11 +21,10 @@ class ProjectSummaryService:
         self,
         db: AsyncSession,
         context: ContextScope,
-        llm: BaseChatModel,
     ):
         self.db = db
         self.context = context
-        self.llm = llm
+        self.llm = build_chat_model(model_name=PROJECT_SUMMARIZATION_MODEL)
         self.document_repository = DocumentRepository(db, context)
         self.project_summary_repository = ProjectSummaryRepository(db, context)
         self.document_summary_repository = DocumentSummaryRepository(db, context)
@@ -38,7 +38,7 @@ class ProjectSummaryService:
         refreshed_at: Optional[datetime] = None,
     ) -> ProjectSummary:
         """Create or refresh the canonical project summary."""
-        effective_refreshed_at = refreshed_at or datetime.utcnow()
+        effective_refreshed_at = refreshed_at or datetime.now(UTC)
         summary_text = await self._generate_project_summary(document_summaries)
 
         return await self.project_summary_repository.upsert_summary(
@@ -72,7 +72,7 @@ class ProjectSummaryService:
             project_id=self.context.primary_project(),
             summary_tokens=None,
             source_document_ids=document_ids,
-            refreshed_at=datetime.utcnow(),
+            refreshed_at=datetime.now(UTC),
         )
 
     async def _generate_project_summary(self, document_summaries: List[str]) -> str:
@@ -95,7 +95,7 @@ class ProjectSummaryService:
                 content=(
                     "Update the existing project summary with the new document insights. "
                     "Keep the overview concise, prefer confirmed facts from the new summaries, "
-                    "and drop outdated information."
+                    "and drop outdated information. Do not say you are updating the summary; just provide the revised summary."
                 )
             ),
             HumanMessage(

@@ -73,6 +73,10 @@ class MilvusVectorStore(VectorStoreGateway):
                 spec.vector_dimension,
                 spec.metric_type,
             )
+            print(
+                "Ensuring Milvus collection '%s' (dim=%s, metric=%s)"
+                % (spec.name, spec.vector_dimension, spec.metric_type)
+            )
             self._collection = await ensure_collection(self._client_factory, spec)
             return self._collection
 
@@ -94,6 +98,7 @@ class MilvusVectorStore(VectorStoreGateway):
             "Milvus upsert: deleting %d existing embeddings before insert",
             len(chunk_ids),
         )
+        print("Milvus upsert: deleting %d existing embeddings before insert" % len(chunk_ids))
 
         await delete_embeddings(collection, chunk_ids)
 
@@ -102,6 +107,7 @@ class MilvusVectorStore(VectorStoreGateway):
             len(records_list),
             self._collection_name,
         )
+        print("Milvus upsert: inserting %d embeddings (collection=%s)" % (len(records_list), self._collection_name))
 
         await insert_embeddings(collection, records_list)
 
@@ -119,6 +125,7 @@ class MilvusVectorStore(VectorStoreGateway):
         logger.info(
             "Milvus delete: removing %d embeddings by chunk_id", len(chunk_ids)
         )
+        print("Milvus delete: removing %d embeddings by chunk_id" % len(chunk_ids))
 
         await delete_embeddings(collection, chunk_ids)
 
@@ -128,6 +135,7 @@ class MilvusVectorStore(VectorStoreGateway):
         *,
         tenant_id: int,
         project_ids: Sequence[int],
+        user_id: str,
         top_k: int = 10,
     ) -> Sequence[VectorSearchResult]:
         if len(query_embedding) != self._vector_dim:
@@ -147,6 +155,10 @@ class MilvusVectorStore(VectorStoreGateway):
             top_k,
             tenant_id,
             ",".join(str(pid) for pid in project_ids),
+        )
+        print(
+            "Milvus search: top_k=%d, tenant_id=%d, projects=%s"
+            % (top_k, tenant_id, ",".join(str(pid) for pid in project_ids))
         )
 
         hits = await search_embeddings(

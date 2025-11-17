@@ -8,7 +8,7 @@ if DATABASE_URL is None:
     raise ValueError("DATABASE_URL environment variable is not set. Please set it in your .env file.")
 
 # Create engine
-engine = create_async_engine(DATABASE_URL, echo=True)  # Set echo=False in production
+engine = create_async_engine(DATABASE_URL, echo=False)  # Set echo=False in production
 
 # Create session factory
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine, class_=AsyncSession)

@@ -1,4 +1,7 @@
 import asyncio
+import os, sys
+sys.path.append(os.path.dirname(os.path.dirname(__file__)))
+
 from logging.config import fileConfig
 
 from alembic import context
@@ -8,6 +11,8 @@ from sqlalchemy.ext.asyncio import AsyncEngine, async_engine_from_config
 
 from config.settings import DATABASE_URL
 from infrastructure.database.database import Base
+
+
 
 config = context.config
 

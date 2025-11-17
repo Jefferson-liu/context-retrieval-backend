@@ -5,7 +5,6 @@ from .knowledge import EntityResolutionResponse, KnowledgeEntityMatch
 from .user import (
     ProductCreateRequest,
     ProductResponse,
-    UserCreateRequest,
     UserResponse,
 )
 
@@ -15,7 +14,6 @@ __all__ = [
     "VectorSearchResult",
     "KnowledgeEntityMatch",
     "EntityResolutionResponse",
-    "UserCreateRequest",
     "UserResponse",
     "ProductCreateRequest",
     "ProductResponse",

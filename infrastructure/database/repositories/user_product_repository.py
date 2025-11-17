@@ -5,62 +5,7 @@ from typing import Optional, Sequence
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from infrastructure.database.models.user_product import AppUser, UserProduct
-
-
-class AppUserRepository:
-    def __init__(self, db: AsyncSession) -> None:
-        self.db = db
-
-    async def get_by_external_id(
-        self,
-        *,
-        tenant_id: int,
-        external_id: str,
-    ) -> Optional[AppUser]:
-        stmt = select(AppUser).where(
-            AppUser.external_id == external_id,
-            AppUser.tenant_id == tenant_id,
-        )
-        result = await self.db.execute(stmt)
-        return result.scalar_one_or_none()
-
-    async def get_by_project_id(
-        self,
-        *,
-        tenant_id: int,
-        project_id: int,
-    ) -> Optional[AppUser]:
-        stmt = select(AppUser).where(
-            AppUser.project_id == project_id,
-            AppUser.tenant_id == tenant_id,
-        )
-        result = await self.db.execute(stmt)
-        return result.scalar_one_or_none()
-
-    async def create_user(
-        self,
-        *,
-        tenant_id: int,
-        project_id: int,
-        external_id: str,
-        name: Optional[str],
-    ) -> AppUser:
-        user = AppUser(
-            tenant_id=tenant_id,
-            project_id=project_id,
-            external_id=external_id,
-            name=name,
-        )
-        self.db.add(user)
-        await self.db.flush()
-        return user
-
-    async def update_user(self, user: AppUser, *, name: Optional[str]) -> AppUser:
-        if name is not None and name != user.name:
-            user.name = name
-            await self.db.flush()
-        return user
+from infrastructure.database.models.user_product import UserProduct
 
 
 class UserProductRepository:
@@ -85,14 +30,14 @@ class UserProductRepository:
         *,
         tenant_id: int,
         project_id: int,
-        user_id: int,
+        owner_external_id: str,
         external_id: str,
         name: Optional[str],
     ) -> UserProduct:
         product = UserProduct(
             tenant_id=tenant_id,
             project_id=project_id,
-            user_id=user_id,
+            owner_external_id=owner_external_id,
             external_id=external_id,
             name=name,
         )
@@ -123,10 +68,10 @@ class UserProductRepository:
         self,
         *,
         tenant_id: int,
-        user_id: int,
+        owner_external_id: str,
     ) -> Sequence[UserProduct]:
         stmt = select(UserProduct).where(
-            UserProduct.user_id == user_id,
+            UserProduct.owner_external_id == owner_external_id,
             UserProduct.tenant_id == tenant_id,
         )
         result = await self.db.execute(stmt)

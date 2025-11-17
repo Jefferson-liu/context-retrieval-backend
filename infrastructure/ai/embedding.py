@@ -2,17 +2,25 @@ import asyncio
 from typing import List
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
-from langchain_openai import ChatOpenAI
 from langchain_core.language_models.chat_models import BaseChatModel
+from openai import AsyncOpenAI
 from sentence_transformers import SentenceTransformer
 
 from config import settings
+from infrastructure.ai.model_factory import build_chat_model
 from infrastructure.utils.prompt_loader import load_prompt
 
+
 class Embedder:
-    def __init__(self, llm: BaseChatModel = None):
-        self.embedding_model = SentenceTransformer('BAAI/llm-embedder')
-        self.llm = llm
+    def __init__(self):
+        self.embedding_model = SentenceTransformer("BAAI/llm-embedder")
+        self.llm = build_chat_model(
+            model_name=settings.EMBEDDING_MODEL,
+            temperature=0,
+        )
+        
+        #Temporary
+        self._client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
 
     async def contextualize_chunk_content(self, chunk_content: str, full_content: str) -> str:
         """Add contextual information to a single chunk for better search retrieval"""
@@ -49,8 +57,19 @@ class Embedder:
                 return content.strip()
         return str(response)
 
-    async def generate_embedding(self, text: str) -> List[float]:
+    async def generate_embedding(self, text: str, local = True) -> List[float]:
         """Generate semantic embedding for the given text using SentenceTransformer"""
-        loop = asyncio.get_event_loop()
-        embedding = await loop.run_in_executor(None, self.embedding_model.encode, text)
-        return embedding.tolist()
+        if local:
+            loop = asyncio.get_event_loop()
+            embedding = await loop.run_in_executor(None, self.embedding_model.encode, text)
+            return embedding.tolist()
+        else:
+            response = await self._client.embeddings.create(
+                model="text-embedding-3-small",
+                input=text,
+                # Align with pgvector/VDB dimension expectations.
+                dimensions=768,
+            )
+            return response.data[0].embedding
+
+    

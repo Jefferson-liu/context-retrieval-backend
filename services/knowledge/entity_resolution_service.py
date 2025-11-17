@@ -1,29 +1,24 @@
 from __future__ import annotations
 
 import re
+import string
 from dataclasses import dataclass
 from difflib import SequenceMatcher
-from typing import Iterable, Optional
+from typing import Iterable, Optional, Sequence
 
 from sqlalchemy.ext.asyncio import AsyncSession
+from rapidfuzz import fuzz
 
 from infrastructure.context import ContextScope
+from schemas.knowledge_graph.entities.entity import Entity
 from infrastructure.database.models.knowledge import KnowledgeEntity
 from infrastructure.database.repositories.knowledge_repository import (
     KnowledgeEntityRepository,
 )
+from services.knowledge.entity_normalizer import normalize_entity_name
 
 
-@dataclass(frozen=True)
-class EntityCandidate:
-    id: int
-    name: str
-    entity_type: str
-    description: Optional[str]
-    confidence: float
-
-
-class KnowledgeEntityResolutionService:
+class EntityResolutionService:
     """Resolve user-supplied entity text to known knowledge graph entities."""
 
     _DEFAULT_MIN_CONFIDENCE = 0.55
@@ -34,124 +29,169 @@ class KnowledgeEntityResolutionService:
         self,
         db: AsyncSession,
         context: ContextScope,
-        *,
         entity_repository: Optional[KnowledgeEntityRepository] = None,
     ) -> None:
         self.db = db
         self.context = context
         self.entity_repository = entity_repository or KnowledgeEntityRepository(db, context)
+        self._fuzzy_threshold = 80.0
+        self._acronym_threshold = 98.0
 
-    async def resolve(
-        self,
-        query: str,
-        *,
-        limit: int | None = None,
-        min_confidence: float | None = None,
-    ) -> list[EntityCandidate]:
-        sanitized = self._normalize(query)
-        if not sanitized:
-            return []
+    # --- Batch canonicalization helpers inspired by prior implementation ---
+    async def canonicalize_batch(self, batch_entities: Sequence[Entity]) -> None:
+        """Upsert extracted entities and canonicalize them using fuzzy matching."""
 
-        limit = limit or self._DEFAULT_LIMIT
-        min_confidence = (
-            min_confidence if min_confidence is not None else self._DEFAULT_MIN_CONFIDENCE
-        )
+        if not batch_entities:
+            return
 
-        entities = await self.entity_repository.list_entities()
-        query_variants = self._generate_variants(sanitized)
-        scored: list[EntityCandidate] = []
+        # Upsert incoming extracted entities first.
+        upserted: list[KnowledgeEntity] = []
+        for ent in batch_entities:
+            ent_type = ent.type or "Entity"
+            normalized = normalize_entity_name(ent.name)
 
-        for entity in entities:
-            score = self._score_against_entity(query_variants, entity)
-            if score >= min_confidence:
-                scored.append(
-                    EntityCandidate(
-                        id=entity.id,
-                        name=entity.name,
-                        entity_type=entity.entity_type,
-                        description=entity.description,
-                        confidence=round(min(score, 1.0), 4),
+            existing = await self.entity_repository.get_entity_by_canonical_name(
+                canonical_name=normalized.canonical_name,
+                entity_type=ent_type,
+            )
+            if not existing:
+                existing = await self.entity_repository.get_entity_by_name_and_type(
+                    name=ent.name,
+                    entity_type=ent_type,
+                )
+            if not existing:
+                existing = await self.entity_repository.create_entity(
+                    name=ent.name,
+                    entity_type=ent_type,
+                    description=ent.description,
+                    canonical_name=normalized.canonical_name,
+                    event_id=None,
+                    resolved_id=None,
+                )
+            upserted.append(existing)
+
+        # Build existing canonicals keyed by type for matching and collision checks.
+        canonicals_by_type: dict[str, list[KnowledgeEntity]] = {}
+        for entity in await self.entity_repository.list_entities():
+            canonicals_by_type.setdefault(entity.entity_type, []).append(entity)
+        claimed_canonicals: dict[str, set[str]] = {
+            etype: {ent.canonical_name for ent in ents}
+            for etype, ents in canonicals_by_type.items()
+        }
+
+        # Group the upserted entities by type for clustering.
+        type_groups: dict[str, list[KnowledgeEntity]] = {}
+        for ent in upserted:
+            type_groups.setdefault(ent.entity_type, []).append(ent)
+
+        for entity_type, entities in type_groups.items():
+            clusters = self._group_entities_by_fuzzy_match(entities)
+            existing_canonicals = canonicals_by_type.get(entity_type, [])
+            claimed = claimed_canonicals.setdefault(entity_type, set())
+
+            for group in clusters.values():
+                if not group:
+                    continue
+                medoid = self._medoid(group)
+                if medoid is None:
+                    continue
+
+                match = self._match_to_canonical(medoid, existing_canonicals)
+                if " " in medoid.name:
+                    acronym = "".join(word[0] for word in medoid.name.split())
+                    acronym_match = next(
+                        (
+                            c
+                            for c in existing_canonicals
+                            if fuzz.ratio(acronym, c.name) >= self._acronym_threshold
+                            and " " not in c.name
+                        ),
+                        None,
                     )
+                    if acronym_match:
+                        match = acronym_match
+
+                canonical_name = (
+                    match.canonical_name if match else self._normalize_canonical(medoid.name)
                 )
 
-        scored.sort(key=lambda candidate: (-candidate.confidence, candidate.name.lower()))
-        return scored[:limit]
+                for ent in group:
+                    # Defensive check against canonical collisions even if not already in claimed set.
+                    existing_canonical = await self.entity_repository.get_entity_by_canonical_name(
+                        canonical_name=canonical_name,
+                        entity_type=ent.entity_type,
+                    )
+                    if existing_canonical and existing_canonical.id != ent.id:
+                        await self.entity_repository.update_entity(
+                            ent.id,
+                            resolved_id=existing_canonical.id,
+                        )
+                        claimed.add(canonical_name)
+                        continue
 
-    def _normalize(self, text: str) -> str:
-        lowered = text.strip().lower()
-        cleaned = self._pattern.sub(" ", lowered)
-        return re.sub(r"\s+", " ", cleaned).strip()
+                    updated = await self.entity_repository.update_entity(
+                        ent.id,
+                        canonical_name=canonical_name,
+                    )
+                    if updated:
+                        claimed.add(canonical_name)
 
-    def _generate_variants(self, text: str) -> set[str]:
-        variants = {text}
-        if text.endswith("ies") and len(text) > 3:
-            variants.add(text[:-3] + "y")
-        if text.endswith("ses") and len(text) > 3:
-            variants.add(text[:-2])
-        if text.endswith("s") and len(text) > 2:
-            variants.add(text[:-1])
-        variants.update(part for part in text.split(" ") if part)
-        return {variant for variant in variants if variant}
+    def _clean(self, name: str) -> str:
+        return name.lower().strip().translate(str.maketrans("", "", string.punctuation))
 
-    def _score_against_entity(
-        self,
-        query_variants: Iterable[str],
-        entity: KnowledgeEntity,
-    ) -> float:
-        entity_normalized = self._normalize(entity.name)
-        entity_variants = self._generate_variants(entity_normalized)
-        if not entity_variants:
-            return 0.0
+    def _group_entities_by_fuzzy_match(
+        self, entities: list[KnowledgeEntity]
+    ) -> dict[str, list[KnowledgeEntity]]:
+        name_to_entities: dict[str, list[KnowledgeEntity]] = {}
+        cleaned_map: dict[str, str] = {}
+        for ent in entities:
+            name_to_entities.setdefault(ent.name, []).append(ent)
+            cleaned_map[ent.name] = self._clean(ent.name)
+        unique_names = list(name_to_entities.keys())
 
-        seq_score = self._sequence_score(query_variants, entity_variants)
-        token_score = self._token_overlap_score(query_variants, entity_variants)
-
-        description_bonus = 0.0
-        if entity.description:
-            description_normalized = self._normalize(entity.description)
-            description_variants = self._generate_variants(description_normalized)
-            description_bonus = 0.1 * self._token_overlap_score(
-                query_variants, description_variants
-            )
-
-        return min(seq_score * 0.7 + token_score * 0.3 + description_bonus, 1.0)
-
-    def _sequence_score(
-        self,
-        query_variants: Iterable[str],
-        entity_variants: Iterable[str],
-    ) -> float:
-        best = 0.0
-        for query_variant in query_variants:
-            for entity_variant in entity_variants:
-                score = SequenceMatcher(None, query_variant, entity_variant).ratio()
-                if score > best:
-                    best = score
-        return best
-
-    def _token_overlap_score(
-        self,
-        query_variants: Iterable[str],
-        entity_variants: Iterable[str],
-    ) -> float:
-        best = 0.0
-        for query_variant in query_variants:
-            query_tokens = self._tokenize(query_variant)
-            if not query_tokens:
+        clustered: dict[str, list[KnowledgeEntity]] = {}
+        used = set()
+        for name in unique_names:
+            if name in used:
                 continue
-            for entity_variant in entity_variants:
-                entity_tokens = self._tokenize(entity_variant)
-                if not entity_tokens:
+            clustered[name] = []
+            for other_name in unique_names:
+                if other_name in used:
                     continue
-                union = query_tokens | entity_tokens
-                if not union:
+                score = fuzz.partial_ratio(cleaned_map[name], cleaned_map[other_name])
+                if score >= self._fuzzy_threshold:
+                    clustered[name].extend(name_to_entities[other_name])
+                    used.add(other_name)
+        return clustered
+
+    def _medoid(self, entities: list[KnowledgeEntity]) -> KnowledgeEntity | None:
+        if not entities:
+            return None
+        n = len(entities)
+        scores = [0.0] * n
+        for i in range(n):
+            for j in range(n):
+                if i == j:
                     continue
-                intersection = query_tokens & entity_tokens
-                score = len(intersection) / len(union)
-                if score > best:
-                    best = score
-        return best
+                s1 = self._clean(entities[i].name)
+                s2 = self._clean(entities[j].name)
+                scores[i] += fuzz.partial_ratio(s1, s2)
+        max_idx = max(range(n), key=lambda idx: scores[idx])
+        return entities[max_idx]
 
-    def _tokenize(self, text: str) -> set[str]:
-        return {token for token in text.split(" ") if token}
+    def _match_to_canonical(
+        self,
+        entity: KnowledgeEntity,
+        canonicals: list[KnowledgeEntity],
+    ) -> KnowledgeEntity | None:
+        best_score = 0.0
+        best = None
+        for canon in canonicals:
+            score = fuzz.partial_ratio(self._clean(entity.name), self._clean(canon.name))
+            if score > best_score:
+                best_score = score
+                best = canon
+        return best if best_score >= self._fuzzy_threshold else None
 
+    def _normalize_canonical(self, name: str) -> str:
+        return self._clean(name)

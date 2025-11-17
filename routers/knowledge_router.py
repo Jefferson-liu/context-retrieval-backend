@@ -6,7 +6,9 @@ from pydantic import BaseModel, Field
 from infrastructure.context import RequestContextBundle
 from routers.dependencies import get_request_context_bundle
 from schemas import EntityResolutionResponse, KnowledgeEntityMatch
-from services.knowledge import KnowledgeEntityResolutionService
+from services.knowledge import EntityResolutionService, KnowledgeGraphService
+from services.text_thread.text_thread_service import TextThreadService
+from schemas.requests.text_thread import UploadTextThreadRequest
 
 
 class EntityResolutionRequest(BaseModel):
@@ -41,7 +43,7 @@ async def resolve_entity(
     if not query:
         raise HTTPException(status_code=400, detail="Query cannot be empty")
 
-    service = KnowledgeEntityResolutionService(context_bundle.db, context_bundle.scope)
+    service = EntityResolutionService(context_bundle.db, context_bundle.scope)
     matches = await service.resolve(
         query,
         limit=request.top_k,
@@ -65,4 +67,19 @@ async def resolve_entity(
             for match in matches
         ],
     )
+
+
+@router.post(
+    "/knowledge/event-invalidations/{batch_id}/apply",
+    summary="Apply a pending event invalidation batch",
+)
+async def apply_event_invalidation_batch(
+    batch_id: str,
+    context_bundle: RequestContextBundle = Depends(get_request_context_bundle),
+):
+    service = KnowledgeGraphService(context_bundle.db, context_bundle.scope)
+    applied = await service.apply_event_invalidation_batch(batch_id, approved_by="api")
+    if not applied:
+        raise HTTPException(status_code=404, detail="Batch not found or already applied")
+    return {"status": "applied", "batch_id": batch_id}
 

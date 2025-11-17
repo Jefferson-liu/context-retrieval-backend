@@ -1,6 +1,6 @@
 from sqlalchemy import Column, Integer, String, Text, DateTime, ForeignKey
 from sqlalchemy.orm import relationship
-from datetime import datetime
+from datetime import datetime, timezone
 from infrastructure.database.database import Base
 from infrastructure.database.models.tenancy import Tenant, Project
 
@@ -8,7 +8,10 @@ class Query(Base):
     __tablename__ = 'queries'
     id = Column(Integer, primary_key=True, index=True)
     query_text = Column(Text, nullable=False)
-    created_date = Column(DateTime, default=datetime.now())
+    created_date = Column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+    )
     tenant_id = Column(Integer, ForeignKey('tenants.id', ondelete='RESTRICT'), nullable=False, index=True)
     project_id = Column(Integer, ForeignKey('projects.id', ondelete='RESTRICT'), nullable=False, index=True)
     user_id = Column(String, nullable=False, index=True)
@@ -23,7 +26,10 @@ class Response(Base):
     query_id = Column(Integer, ForeignKey('queries.id', ondelete='CASCADE'), unique=True)
     response_text = Column(Text)
     status = Column(String, default='pending')  # 'pending', 'success', 'failed'
-    created_date = Column(DateTime, default=datetime.now())
+    created_date = Column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+    )
     tenant_id = Column(Integer, ForeignKey('tenants.id', ondelete='RESTRICT'), nullable=False, index=True)
     project_id = Column(Integer, ForeignKey('projects.id', ondelete='RESTRICT'), nullable=False, index=True)
 
@@ -41,7 +47,10 @@ class Source(Base):
     doc_id = Column(Integer)    # ID of the document the chunk belongs to
     doc_name = Column(String)   # Name of the document
     snippet = Column(Text)      # Text snippet from the chunk
-    created_date = Column(DateTime, default=datetime.now())
+    created_date = Column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+    )
     tenant_id = Column(Integer, ForeignKey('tenants.id', ondelete='RESTRICT'), nullable=False, index=True)
     project_id = Column(Integer, ForeignKey('projects.id', ondelete='RESTRICT'), nullable=False, index=True)
     

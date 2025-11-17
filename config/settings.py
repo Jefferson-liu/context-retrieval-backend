@@ -25,9 +25,20 @@ if DATABASE_URL is None:
     )
 
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+AWS_BEDROCK_API_KEY = os.getenv("AWS_BEDROCK_API_KEY")
 GIT_REPO_PATH = os.getenv("GIT_REPO_PATH")
 LLM_PROVIDER = os.getenv("LLM_PROVIDER", "anthropic").lower()
 API_AUTH_TOKEN = os.getenv("API_AUTH_TOKEN")
+USER_DIRECTORY_BASE_URL = os.getenv("USER_DIRECTORY_BASE_URL")
+USER_DIRECTORY_API_KEY = os.getenv("USER_DIRECTORY_API_KEY")
+APP_ENV = os.getenv("APP_ENV", "prod").lower()
+IS_DEV_MODE = APP_ENV in {"dev", "development"}
+DEV_PLACEHOLDER_USER_ID = os.getenv("DEV_PLACEHOLDER_USER_ID", "dev-user")
+DEV_PLACEHOLDER_USER_NAME = os.getenv("DEV_PLACEHOLDER_USER_NAME", "Developer")
+DEV_PLACEHOLDER_PRODUCT_ID = os.getenv("DEV_PLACEHOLDER_PRODUCT_ID", "dev-product")
+DEV_PLACEHOLDER_PRODUCT_NAME = os.getenv("DEV_PLACEHOLDER_PRODUCT_NAME", "Dev Product")
+DEV_PLACEHOLDER_PROJECT_SLUG = os.getenv("DEV_PLACEHOLDER_PROJECT_SLUG", "dev-product")
 
 # Embedding/vector configuration
 EMBEDDING_VECTOR_DIM = int(os.getenv("EMBEDDING_VECTOR_DIM", "768"))
@@ -41,3 +52,30 @@ MILVUS_PASSWORD = os.getenv("MILVUS_PASSWORD")
 MILVUS_COLLECTION_NAME = os.getenv("MILVUS_COLLECTION_NAME", "document_chunks")
 MILVUS_VECTOR_DIM = int(os.getenv("MILVUS_VECTOR_DIM", str(EMBEDDING_VECTOR_DIM)))
 MILVUS_CONSISTENCY_LEVEL = os.getenv("MILVUS_CONSISTENCY_LEVEL", "Bounded")
+
+
+def _bool_env(name: str, default: str = "1") -> bool:
+    value = os.getenv(name, default).strip().lower()
+    return value not in {"0", "false", "no"}
+
+
+KNOWLEDGE_AUTO_INVALIDATION = _bool_env("KNOWLEDGE_AUTO_INVALIDATION", "false")
+
+EMBEDDING_MODEL = "claude-3-haiku-20240307"
+COMMIT_MESSAGE_MODEL = "claude-3-haiku-20240307"
+CONTEXT_SUMMARIZATION_MODEL = "claude-3-haiku-20240307"
+
+STATEMENT_EXTRACTION_MODEL = "amazon.nova-pro-v1:0"
+DATE_EXTRACTION_MODEL = "amazon.nova-pro-v1:0"
+TRIPLET_EXTRACTION_MODEL = "amazon.nova-pro-v1:0"
+KNOWLEDGE_INVALIDATION_MODEL = "amazon.nova-pro-v1:0"
+
+#maybe sunset these in favor of the knowledge graph models?
+CLAUSE_FORMING_MODEL = "claude-3-haiku-20240307"
+SUBQUESTION_DECOMPOSER_MODEL = "claude-3-haiku-20240307"
+
+#Sunsetting
+KNOWLEDGE_EXTRACTION_MODEL = "claude-3-haiku-20240307"
+PROJECT_SUMMARIZATION_MODEL = "claude-3-haiku-20240307"
+DOCUMENT_SUMMARIZATION_MODEL = "claude-3-haiku-20240307"
+

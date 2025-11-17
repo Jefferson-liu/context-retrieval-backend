@@ -39,6 +39,10 @@ cd context-retrieval-backend
 python -m venv .venv
 .venv\Scripts\activate
 
+# (Optional) create a separate WSL/Linux venv when working inside WSL
+python3 -m venv .venv-wsl
+source .venv-wsl/bin/activate
+
 # Install dependencies
 pip install -r requirements.txt
 
@@ -124,7 +128,7 @@ The compose file persists database, Milvus, and Hugging Face caches in named vol
 3. **Contextualization:** each chunk is enriched with additional context using an Anthropic prompt (`Embedder.contextualize_chunk_content`).
 4. **Embeddings:** SentenceTransformer `BAAI/llm-embedder` encodes contextualized chunks; vectors are persisted via the active `VectorStoreGateway`.
 5. **Summaries:** `DocumentSummaryService` generates an LLM-based summary for the full document; `ProjectSummaryService` consolidates document summaries into a project-level overview.
-6. **Knowledge Graph (optional):** `KnowledgeGraphService` updates graph entities and relationships.
+6. **Temporal Knowledge Graph (optional):** `KnowledgeGraphService` runs the temporal agent to extract statements, resolve validity windows, and persist canonical triplets.
 7. **Version-control:** when `GIT_REPO_PATH` is configured, the document content is written to disk and committed via `GitService`.
 
 ### Query Answering
@@ -140,6 +144,16 @@ The compose file persists database, Milvus, and Hugging Face caches in named vol
 ### Summaries
 - **Document Summaries:** `DocumentSummaryService` stores text + metadata in the `document_summaries` table and (when Milvus is active) pushes summary vectors into the summary collection.
 - **Project Summaries:** `ProjectSummaryService` aggregates document summaries per project to keep a high-level view current. Updates occur after document ingestion; the service handles both initial creation and incremental updates.
+
+### Temporal Knowledge Graph
+- `KnowledgeGraphService` wires together a temporal agent pipeline:
+  1. `statement_extraction` prompt decomposes each chunk into atomic statements with type labels.
+  2. `date_extraction` resolves `valid_at`/`invalid_at` windows directly from the document text.
+  3. `triplet_extraction` turns statements into canonical (subject, predicate, object, value) records.
+- A dedicated invalidation agent compares each new statement against existing ones for the same subject/predicate/object. When the LLM determines an older fact is superseded, its `invalid_at` timestamp is updated automatically so queries never surface stale truths.
+- Set `KNOWLEDGE_AUTO_INVALIDATION=0` to require human approval. Suggested invalidations are stored in `knowledge_statement_invalidations`; use an admin workflow to accept/reject entries (which will set `invalid_at` when approved).
+- Persisted data lives entirely inside PostgreSQL: statements land in `knowledge_statements`, per-statement triplets go into `knowledge_statement_triplets`, and entities reuse the existing `knowledge_entities`/`knowledge_entity_aliases` tables. `KnowledgeContextBuilder` queries these tables to assemble grounded context for query answering.
+- For existing databases that pre-date the Alembic history, seed the `alembic_version` table once via `python -m scripts.seed_alembic_version` before running `alembic upgrade`.
 
 ---
 

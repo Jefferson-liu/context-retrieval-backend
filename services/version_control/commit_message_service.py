@@ -1,7 +1,7 @@
 from __future__ import annotations
-
+from config.settings import COMMIT_MESSAGE_MODEL
 from typing import Optional
-
+from infrastructure.ai.model_factory import build_chat_model
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.prompts import (
     ChatPromptTemplate,
@@ -13,8 +13,8 @@ from langchain_core.prompts import (
 class CommitMessageService:
     """Generate short, descriptive commit messages for repository updates."""
 
-    def __init__(self, llm: BaseChatModel) -> None:
-        self.llm = llm
+    def __init__(self) -> None:
+        self.llm = build_chat_model(COMMIT_MESSAGE_MODEL)
         self._prompt = ChatPromptTemplate.from_messages(
             [
                 SystemMessagePromptTemplate.from_template(

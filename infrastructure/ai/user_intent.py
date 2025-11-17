@@ -1,3 +1,4 @@
+from asyncio.log import logger
 import json
 from typing import Any, List
 
@@ -5,6 +6,8 @@ from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from pydantic import BaseModel, ValidationError
+from config.settings import SUBQUESTION_DECOMPOSER_MODEL
+from infrastructure.ai.model_factory import build_chat_model
 
 
 class QuerySubquestions(BaseModel):
@@ -16,8 +19,8 @@ class CoverageResult(BaseModel):
 
 
 class SubquestionDecomposer:
-    def __init__(self, llm: BaseChatModel):
-        self.llm = llm
+    def __init__(self):
+        self.llm = build_chat_model(model_name=SUBQUESTION_DECOMPOSER_MODEL)
 
     async def get_required_subquestions(
         self,
@@ -25,12 +28,23 @@ class SubquestionDecomposer:
         user_query: str,
     ) -> List[str]:
         system_prompt = (
-            "You are an expert at generating queries for a vector search system.\n"
-            "You break queries into only the NECESSARY subqueries.\n"
-            "If the user's query is already atomic (answerable as a single fact or step), "
-            "return the user's query as the only subquery.\n"
-            "Vector search works best when matching relevant words, so avoid overly broad or vague subqueries.\n"
-            "Otherwise, return 2 to 6 subquestions, each one sentence and single-aspect."
+            "You are a helpful assistant that prepares queries that will be sent to a search component."
+            "Sometimes, these queries are very complex."
+            "Your job is to simplify complex queries into multiple queries that can be answered "
+            "in isolation to each other."
+            "You are given the summary of the knowledge base."
+            "Pose subquestions such that you think they can be answerable by the knowledge base."
+            "If the query is simple, then keep it as it is."
+            "Examples:\n"
+            "- Input: \"who's the designer at TrackRec?\" -> {\"subquestions\": [\"Who's the designer at TrackRec?\"]}\n"
+            "- Input: \"What are the aspects that make up the business of TrackRec?\" -> "
+            "{\"subquestions\": [\"What is TrackRec's product?\", \"Who are TrackRec's customers?\", "
+            "\"How does TrackRec generate revenue?\", \"What advantages does TrackRec have as a business?\"]}\n"
+            "- Input: \"Who works at TrackRec?\" -> "
+            "{\"subquestions\": [\"Who are the employees at TrackRec?\", \"What roles exist at TrackRec?\", "
+            "\"What is TrackRec's team structure?\", \"Who is the leadership at TrackRec?\"]}"
+            "Given the conversation so far and the user's query, output JSON only.\n"
+            "Schema: {\"subquestions\": string[]}"
         )
 
         prompt = ChatPromptTemplate.from_messages(
@@ -39,25 +53,18 @@ class SubquestionDecomposer:
                 MessagesPlaceholder("history"),
                 HumanMessage(
                     content=(
-                        "Given the conversation so far and the user's query, output JSON only.\n"
-                        "Schema: {\"subquestions\": string[]}\n\n"
                         f"User query: {user_query}\n\n"
-                        "Examples:\n"
-                        "- Input: \"who's the designer at TrackRec?\" -> {\"subquestions\": [\"designer at TrackRec\"]}\n"
-                        "- Input: \"What are the aspects that make up the business of TrackRec?\" -> "
-                        "{\"subquestions\": [\"TrackRec product\", \"TrackRec customers\", "
-                        "\"TrackRec revenue model\", \"Business advantages\"]}\n"
-                        "- Input: \"Who works at TrackRec?\" -> "
-                        "{\"subquestions\": [\"TrackRec employees\", \"TrackRec roles\", "
-                        "\"TrackRec team structure\", \"TrackRec leadership\"]}"
                     )
                 ),
             ]
         )
-
+        logger.info("decomposer prompt: %s", prompt)
         chain = prompt | self.llm
         raw_response = await chain.ainvoke({"history": message_history})
         response_text = self._coerce_to_text(raw_response)
+        
+        logger.info("sent to decomposer: %s", response_text)
+        
         return self._parse_subquestions(response_text, user_query)
 
     async def covers_all_subquestions(self, response: str, subquestions: List[str]) -> bool:

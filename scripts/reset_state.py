@@ -24,16 +24,20 @@ logger = logging.getLogger("reset_state")
 
 async def reset_database() -> None:
     logger.info("Dropping database tables...")
+    print("Dropping database tables...")
     await drop_tables()
 
     logger.info("Recreating database tables...")
+    print("Recreating database tables...")
     await create_tables()
 
     async with engine.begin() as conn:
         logger.info("Configuring multi-tenant RLS policies...")
+        print("Configuring multi-tenant RLS policies...")
         await configure_multi_tenant_rls(conn)
 
     logger.info("Seeding default tenant and project...")
+    print("Seeding default tenant and project...")
     await seed_default_tenant_and_project()
 
 
@@ -46,8 +50,10 @@ async def _drop_milvus_collection(alias: str, collection_name: str) -> None:
             collection.release()
             collection.drop()
             logger.info("Dropped Milvus collection '%s'", collection_name)
+            print("Dropped Milvus collection '%s'" % collection_name)
         else:
             logger.info("Milvus collection '%s' does not exist; skipping.", collection_name)
+            print("Milvus collection '%s' does not exist; skipping." % collection_name)
 
     await loop.run_in_executor(None, _drop)
 
@@ -55,6 +61,7 @@ async def _drop_milvus_collection(alias: str, collection_name: str) -> None:
 async def reset_milvus() -> None:
     if settings.VECTOR_STORE_MODE != "milvus":
         logger.info("VECTOR_STORE_MODE != 'milvus'; skipping Milvus reset.")
+        print("VECTOR_STORE_MODE != 'milvus'; skipping Milvus reset.")
         return
 
     factory = MilvusClientFactory(
@@ -84,6 +91,7 @@ async def reset_document_files() -> None:
     git_repo_path = settings.GIT_REPO_PATH
     if not git_repo_path:
         logger.info("GIT_REPO_PATH not set; skipping document file cleanup.")
+        print("GIT_REPO_PATH not set; skipping document file cleanup.")
         return
 
     documents_dir = (Path(git_repo_path).resolve() / "documents").expanduser()
@@ -96,6 +104,7 @@ async def reset_document_files() -> None:
 
     await loop.run_in_executor(None, _reset_directory)
     logger.info("Cleared document files at '%s'", documents_dir)
+    print("Cleared document files at '%s'" % documents_dir)
 
 
 async def main() -> None:
@@ -104,6 +113,7 @@ async def main() -> None:
         await reset_milvus()
         await reset_document_files()
         logger.info("State reset complete.")
+        print("State reset complete.")
     finally:
         await engine.dispose()
 

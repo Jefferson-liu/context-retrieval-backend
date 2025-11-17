@@ -17,7 +17,7 @@ def create_toolset(db: AsyncSession, context: ContextScope):
     @tool("search_chunks", return_direct=False)
     async def search_chunks(query: str) -> str:
         """Returns relevant document chunks for a given query. This does semantic search so it works best with short direct queries."""
-        results = await search_service.semantic_search(query)
+        results = await search_service.semantic_search(query, top_k=10)
         payload = [{
             "chunk_id": result.chunk_id,
             "doc_id": result.doc_id,

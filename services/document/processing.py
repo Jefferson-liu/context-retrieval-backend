@@ -10,14 +10,11 @@ from infrastructure.ai.embedding import Embedder
 from infrastructure.version_control.git_service import GitService
 from services.file import DocumentFileService
 from infrastructure.vector_store import VectorRecord, create_vector_store
-from langchain_anthropic import ChatAnthropic
 from config import settings
 from services.knowledge import KnowledgeGraphService
 from services.summaries import DocumentSummaryService, ProjectSummaryService
 from services.version_control import CommitMessageService
 
-
-claude_haiku = ChatAnthropic(temperature=0, model_name="claude-3-haiku-20240307", api_key=settings.ANTHROPIC_API_KEY)
 logger = logging.getLogger(__name__)
 
 
@@ -28,18 +25,14 @@ class DocumentProcessingService:
         self.document_repository = DocumentRepository(db, context)
         self.chunk_repository = ChunkRepository(db, context)
         self.chunker = Chunker()
-        self.embedder = Embedder(claude_haiku)
+        self.embedder = Embedder()
         self.git_service = GitService()
-        self.commit_message_service = CommitMessageService(claude_haiku)
+        self.commit_message_service = CommitMessageService()
         self.document_file_service = DocumentFileService()
         self.vector_store = create_vector_store(db)
-        self.knowledge_service = KnowledgeGraphService(db, context, llm=claude_haiku)
-        self.project_summary_service = ProjectSummaryService(db, context, llm=claude_haiku)
-        self.document_summary_service = DocumentSummaryService(
-            db,
-            context,
-            llm=claude_haiku,
-        )
+        self.knowledge_service = KnowledgeGraphService(db,context)
+        self.project_summary_service = ProjectSummaryService(db, context)
+        self.document_summary_service = DocumentSummaryService(db,context)
         
         
     async def upload_and_process_document(
@@ -50,41 +43,43 @@ class DocumentProcessingService:
         commit_message: str | None = None,
     ):
         """Upload and fully process a document (save, chunk, embed)."""
-        # Step 1: Save the document
-        db_document = await self.document_repository.create_document(
-            doc_name=doc_name, content=content, doc_size=len(content), doc_type=doc_type
-        )
-
-        doc_id = db_document.id
-
-        # Step 2: Process the document (chunk and embed)
-        await self.process_document(doc_id, content, doc_name=doc_name)
-
-        file_path = await self.document_file_service.write_document(doc_id, doc_name, content)
-        if file_path:
-            message = commit_message or await self._build_commit_message(
-                action="Add document",
-                doc_name=doc_name,
-                details=f"Type: {doc_type}" if doc_type else None,
-                fallback=f"Upload document: {doc_name}",
+        try:
+            logger.info("Starting upload pipeline for doc=%s (type=%s, bytes=%s)", doc_name, doc_type, len(content))
+            print("Starting upload pipeline for doc=%s (type=%s, bytes=%s)" % (doc_name, doc_type, len(content)))
+            # Step 1: Save the document
+            db_document = await self.document_repository.create_document(
+                doc_name=doc_name, content=content, doc_size=len(content), doc_type=doc_type
             )
-            await self.git_service.commit_changes(message=message, added_paths=[file_path])
 
-        # FastAPI will automatically commit the transaction on successful response
-        return doc_id
+            doc_id = db_document.id
+
+            # Step 2: Process the document (chunk and embed)
+            knowledge_result = await self.process_document(doc_id, content, doc_name=doc_name)
+
+            file_path = await self.document_file_service.write_document(doc_id, doc_name, content)
+            if file_path:
+                message = commit_message or await self._build_commit_message(
+                    action="Add document",
+                    doc_name=doc_name,
+                    details=f"Type: {doc_type}" if doc_type else None,
+                    fallback=f"Upload document: {doc_name}",
+                )
+                await self.git_service.commit_changes(message=message, added_paths=[file_path])
+
+            # FastAPI will automatically commit the transaction on successful response
+            return {
+                "doc_id": doc_id,
+                "knowledge_result": knowledge_result,
+            }
+        except Exception as exc:
+            logger.exception("Upload pipeline failed for doc=%s: %s", doc_name, exc)
+            print("Upload pipeline failed for doc=%s: %s" % (doc_name, exc))
+            raise
 
     async def process_document(self, document_id: int, content: str, doc_name: str | None = None):
         """Process a document: create chunks and embeddings."""
         # Chunk the content
         chunks = await self.chunker.chunk_text(content)
-
-        if not chunks:
-            await self.knowledge_service.refresh_document_knowledge(
-                document_id,
-                doc_name or "",
-                content,
-            )
-            return
 
         parallelism = max(1, min(4, len(chunks)))
         context_sem = asyncio.Semaphore(parallelism)
@@ -115,7 +110,7 @@ class DocumentProcessingService:
             text_parts = [chunk_obj.context, chunk_obj.content]
             text = " ".join(part for part in text_parts if part).strip()
             async with embed_sem:
-                embedding = await self.embedder.generate_embedding(text)
+                embedding = await self.embedder.generate_embedding(text, local=False)
             return VectorRecord(
                 chunk_id=chunk_obj.id,
                 embedding=embedding,
@@ -126,7 +121,7 @@ class DocumentProcessingService:
         records = await asyncio.gather(*(build_vector_record(chunk_obj) for chunk_obj in chunk_objects))
 
         await self.vector_store.upsert_vectors(records)
-        await self.knowledge_service.refresh_document_knowledge(
+        knowledge_result = await self.knowledge_service.refresh_document_knowledge(
             document_id,
             doc_name or "",
             content,
@@ -138,6 +133,7 @@ class DocumentProcessingService:
         )
         
         await self.project_summary_service.update_summary()
+        return knowledge_result
 
 
     async def update_document(
@@ -230,5 +226,6 @@ class DocumentProcessingService:
             )
         except Exception as exc:
             logger.warning("Failed to generate commit message via LLM: %s", exc)
+            print("Failed to generate commit message via LLM: %s" % exc)
             return fallback
     
