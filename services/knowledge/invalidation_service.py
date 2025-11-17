@@ -4,7 +4,7 @@ import asyncio
 from concurrent.futures import ThreadPoolExecutor
 import logging
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from typing import Any, Awaitable, Callable, Dict, List, Optional
 from collections import Counter, defaultdict
 
 from scipy.spatial.distance import cosine
@@ -22,11 +22,12 @@ from infrastructure.database.repositories.knowledge_temporal_repository import (
 from infrastructure.database.repositories.knowledge_event_repository import (
     KnowledgeEventRepository,
 )
+from infrastructure.database.repositories.knowledge_repository import KnowledgeEntityRepository
 from config import settings
 from prompts.knowledge_graph.invalidation import (
     build_invalidation_prompt
 )
-from schemas.knowledge_graph.enums.types import TemporalType
+from schemas.knowledge_graph.enums.types import TemporalType, StatementType
 from schemas.knowledge_graph.invalidation import InvalidationDecisionList
 from infrastructure.ai.model_factory import build_chat_model    
 from config.settings import KNOWLEDGE_INVALIDATION_MODEL
@@ -47,13 +48,17 @@ class KnowledgeInvalidationService:
         triplet_repository: KnowledgeStatementTripletRepository,
         invalidation_repository: KnowledgeStatementInvalidationRepository,
         event_repository: KnowledgeEventRepository | None = None,
+        entity_repository: KnowledgeEntityRepository | None = None,
+        embedding_fn: Callable[[str], Awaitable[list[float]]] | None = None,
         auto_apply: bool | None = None,
-        max_workers: int = 5,
+        max_workers: int = 2,
     ) -> None:
         self.statement_repository = statement_repository
         self.triplet_repository = triplet_repository
         self.invalidation_repository = invalidation_repository
         self.event_repository = event_repository
+        self.entity_repository = entity_repository
+        self._embedding_fn = embedding_fn
         self.auto_apply = (
             settings.KNOWLEDGE_AUTO_INVALIDATION if auto_apply is None else auto_apply
         )
@@ -64,6 +69,41 @@ class KnowledgeInvalidationService:
         )
         self._similarity_threshold = 0.5
         self._top_k = 10
+    
+    async def _to_temporal_event(self, event: Any) -> TemporalEvent | None:
+        """Convert a DB event into a TemporalEvent, fetching its statement when needed."""
+        if isinstance(event, TemporalEvent):
+            return event
+
+        statement_obj = getattr(event, "statement_ref", None)
+        if not statement_obj and getattr(event, "statement_id", None) and self.statement_repository:
+            try:
+                statement_obj = await self.statement_repository.get_statement_by_id(str(event.statement_id))
+            except Exception:
+                statement_obj = None
+
+        if not statement_obj:
+            return None
+
+        stmt_type = statement_obj.statement_type
+        temp_type = statement_obj.temporal_type
+        if isinstance(stmt_type, str):
+            stmt_type = StatementType(stmt_type)
+        if isinstance(temp_type, str):
+            temp_type = TemporalType(temp_type)
+
+        return TemporalEvent(
+            id=getattr(event, "id", None),
+            statement_id=getattr(event, "statement_id", None),
+            statement=statement_obj.statement,
+            statement_type=stmt_type,
+            temporal_type=temp_type,
+            valid_at=getattr(event, "valid_at", None) or statement_obj.valid_at,
+            invalid_at=getattr(event, "invalid_at", None) or statement_obj.invalid_at,
+            embedding=getattr(statement_obj, "embedding", None),
+            invalidated_by=getattr(event, "invalidated_by", None),
+            chunk_id=getattr(event, "chunk_id", None),
+        )
     
     def _coerce_response_to_bool(self, response: Any) -> bool:
         """Best-effort conversion of LLM structured output into a boolean."""
@@ -211,47 +251,22 @@ class KnowledgeInvalidationService:
 
         return overlap
     
-    def filter_by_embedding_similarity(
-        self,
-        reference_event: TemporalEvent,
-        candidate_pairs: list[tuple[Triplet, TemporalEvent]],
-    ) -> list[tuple[Triplet, TemporalEvent]]:
-        """Filter triplet-event pairs by embedding similarity."""
-        pairs_with_similarity = [
-            (triplet, event, self.cosine_similarity(reference_event.embedding, event.embedding)) for triplet, event in candidate_pairs
-        ]
-
-        filtered_pairs = [
-            (triplet, event) for triplet, event, similarity in pairs_with_similarity if similarity >= self._similarity_threshold
-        ]
-
-        sorted_pairs = sorted(filtered_pairs, key=lambda x: self.cosine_similarity(reference_event.embedding, x[1].embedding), reverse=True)
-
-        return sorted_pairs[: self._top_k]
-    
     def select_temporally_relevant_events_for_invalidation(
         self,
         incoming_event: TemporalEvent,
         candidate_triplet_events: list[tuple[Triplet, TemporalEvent]],
     ) -> list[tuple[Triplet, TemporalEvent]] | None:
         """Select relevant events to consider for invalidation."""
-        # If we don't have embeddings on candidates, we cannot score similarity; skip.
-        if any(not hasattr(ev, "embedding") for _, ev in candidate_triplet_events):
-            return None
-
-        # Without temporal gating, just use semantic similarity against all candidates.
-        return self.filter_by_embedding_similarity(
-            reference_event=incoming_event,
-            candidate_pairs=candidate_triplet_events,
-        )
+        # Without embeddings, simply return all candidate pairs. Upstream already reduces by entity overlap.
+        return candidate_triplet_events
     
-    @retry(wait=wait_random_exponential(multiplier=1, min=1, max=30), stop=stop_after_attempt(3))
+    @retry(wait=wait_random_exponential(multiplier=2, min=1, max=30), stop=stop_after_attempt(3))
     async def invalidation_step(
         self,
         primary_event: TemporalEvent,
-        primary_triplet: Triplet,
         secondary_event: TemporalEvent,
-        secondary_triplet: Triplet,
+        primary_triplet_str: str,
+        secondary_triplet_str: str,
     ) -> TemporalEvent:
         """Check if primary event should be invalidated by secondary event.
 
@@ -260,16 +275,26 @@ class KnowledgeInvalidationService:
             primary_triplet: Triplet associated with primary event
             secondary_event: Event that might cause invalidation
             secondary_triplet: Triplet associated with secondary event
+            primary_triplet_str: Human-readable rendering of primary_triplet
+            secondary_triplet_str: Human-readable rendering of secondary_triplet
 
         Returns:
             TemporalEvent: Updated primary event (may have invalid_at and invalidated_by set)
         """
         invalidation_prompt = build_invalidation_prompt(
-            primary_statement=primary_event,
-            primary_triplet=primary_triplet,
-            secondary_statement=secondary_event,
-            secondary_triplet=secondary_triplet,
+            primary_event=primary_event,
+            primary_triplet=primary_triplet_str,
+            secondary_event=secondary_event,
+            secondary_triplet=secondary_triplet_str,
         )
+        # Log full prompt/messages to inspect LLM input (no truncation)
+        formatted_prompt = invalidation_prompt.format_prompt()
+        prompt_messages = formatted_prompt.to_messages()
+        rendered_prompt = formatted_prompt.to_string()
+        logger.info("Invalidation LLM prompt messages: %s", prompt_messages)
+        logger.info("Invalidation LLM prompt (rendered):\n%s", rendered_prompt)
+        print("Invalidation LLM prompt messages: %s" % prompt_messages)
+        print("Invalidation LLM prompt (rendered):\n%s" % rendered_prompt)
         chain = invalidation_prompt | self._invalidation_llm
         response = await chain.ainvoke({})
         decision = self._coerce_response_to_bool(response)
@@ -289,9 +314,10 @@ class KnowledgeInvalidationService:
             return primary_event
 
         # Create updated event with invalidation info
+        fallback_invalid_at = secondary_event.valid_at or datetime.now(timezone.utc)
         updated_event = primary_event.model_copy(
             update={
-                "invalid_at": secondary_event.valid_at,
+                "invalid_at": fallback_invalid_at,
                 "expired_at": datetime.now(),
                 "invalidated_by": secondary_event.id,
             }
@@ -313,6 +339,8 @@ class KnowledgeInvalidationService:
         incoming_triplet: Triplet,
         incoming_event: TemporalEvent,
         existing_triplet_events: list[tuple[Triplet, TemporalEvent]],
+        *,
+        triplet_renderer,
     ) -> tuple[TemporalEvent, list[TemporalEvent]]:
         """Validate and update temporal information for triplet events with full bidirectional invalidation.
 
@@ -326,6 +354,7 @@ class KnowledgeInvalidationService:
         """
         changed_existing_events: list[TemporalEvent] = []
         updated_incoming_event = incoming_event
+        incoming_triplet_str = triplet_renderer(incoming_triplet)
 
         # Skip invalidation for atemporal events
         if incoming_event.temporal_type == TemporalType.ATEMPORAL:
@@ -342,9 +371,9 @@ class KnowledgeInvalidationService:
             tasks = [
                 self.invalidation_step(
                     primary_event=existing_event,
-                    primary_triplet=existing_triplet,
                     secondary_event=incoming_event,
-                    secondary_triplet=incoming_triplet,
+                    primary_triplet_str=triplet_renderer(existing_triplet),
+                    secondary_triplet_str=incoming_triplet_str,
                 )
                 for existing_triplet, existing_event in temporal_events
             ]
@@ -368,12 +397,15 @@ class KnowledgeInvalidationService:
             ]
 
             if invalidating_events:
+                incoming_triplet_str = triplet_renderer(incoming_triplet)
                 tasks = [
                     self.invalidation_step(
                         primary_event=incoming_event,
                         primary_triplet=incoming_triplet,
                         secondary_event=existing_event,
                         secondary_triplet=existing_triplet,
+                        primary_triplet_str=incoming_triplet_str,
+                        secondary_triplet_str=triplet_renderer(existing_triplet),
                     )
                     for existing_triplet, existing_event in invalidating_events
                 ]
@@ -480,8 +512,84 @@ class KnowledgeInvalidationService:
                 - List of updated incoming events (potentially invalidated)
                 - List of existing events that were updated (deduplicated)
         """
+        if existing_events:
+            converted_existing_events: list[TemporalEvent] = []
+            for ev in existing_events:
+                converted = await self._to_temporal_event(ev)
+                if converted:
+                    converted_existing_events.append(converted)
+            existing_events = converted_existing_events
+
+        # Preload entity names for human-readable triplets
+        entity_ids: set[int] = set()
+        for t in incoming_triplets:
+            subj = getattr(t, "subject_id", getattr(t, "subject_entity_id", None))
+            obj = getattr(t, "object_id", getattr(t, "object_entity_id", None))
+            if subj:
+                try:
+                    entity_ids.add(int(subj))
+                except Exception:
+                    pass
+            if obj:
+                try:
+                    entity_ids.add(int(obj))
+                except Exception:
+                    pass
+        for t in existing_triplets:
+            subj = getattr(t, "subject_id", getattr(t, "subject_entity_id", None))
+            obj = getattr(t, "object_id", getattr(t, "object_entity_id", None))
+            if subj:
+                try:
+                    entity_ids.add(int(subj))
+                except Exception:
+                    pass
+            if obj:
+                try:
+                    entity_ids.add(int(obj))
+                except Exception:
+                    logger.warning("Failed to parse entity ID: %s", obj)
+                    pass
+
+        entity_map: dict[int, Any] = {}
+        if self.entity_repository and entity_ids:
+            try:
+                entity_map = await self.entity_repository.list_entities_by_ids(entity_ids)  # type: ignore[arg-type]
+            except Exception as exc:  # pylint: disable=broad-except
+                logger.warning("Failed to preload entities for triplet rendering: %s", exc)
+                print("Failed to preload entities for triplet rendering: %s" % exc)
+
+        def _render_triplet(triplet: Triplet) -> str:
+            def resolve(name_field, id_field):
+                if name_field:
+                    return name_field
+                if id_field is None:
+                    return ""
+                try:
+                    entity_obj = entity_map.get(int(id_field))
+                    if entity_obj:
+                        return getattr(entity_obj, "canonical_name", None) or getattr(entity_obj, "name", None) or str(id_field)
+                except Exception:
+                    logger.warning("Failed to resolve entity name for ID: %s", id_field)
+                    print("Failed to resolve entity name for ID: %s" % id_field)
+                    pass
+                return str(id_field)
+
+            subj_name = resolve(
+                getattr(triplet, "subject_name", None),
+                getattr(triplet, "subject_id", getattr(triplet, "subject_entity_id", None)),
+            )
+            obj_name = resolve(
+                getattr(triplet, "object_name", None),
+                getattr(triplet, "object_id", getattr(triplet, "object_entity_id", None)),
+            )
+            predicate_val = getattr(triplet, "predicate", None)
+            if hasattr(predicate_val, "value"):
+                predicate_val = predicate_val.value
+            return f"{subj_name} {predicate_val} {obj_name}".strip()
+
         # Create mappings for faster lookups
         event_map = {str(getattr(e, "id", None)): e for e in existing_events if getattr(e, "id", None)}
+        statement_event_map = {str(getattr(e, "statement_id", None)): e for e in existing_events if getattr(e, "statement_id", None)}
         incoming_event_map = {str(t.event_id): e for t, e in zip(incoming_triplets, incoming_events, strict=False)}
 
         # Prepare tasks for parallel processing
@@ -494,34 +602,46 @@ class KnowledgeInvalidationService:
             for t in existing_triplets:
                 subj = getattr(t, "subject_id", getattr(t, "subject_entity_id", None))
                 obj = getattr(t, "object_id", getattr(t, "object_entity_id", None))
-                ev_id = getattr(t, "event_id", None) or getattr(t, "statement_id", None)
-                if ev_id is None:
-                    continue
+                ev_id = getattr(t, "event_id", None)
+                stmt_id = getattr(t, "statement_id", None)
                 if (str(subj) == str(incoming_triplet.subject_id)) or (str(obj) == str(incoming_triplet.object_id)):
-                    if str(ev_id) in event_map:
+                    if ev_id and str(ev_id) in event_map:
                         related_pairs.append((t, event_map[str(ev_id)]))
+                    elif stmt_id and str(stmt_id) in statement_event_map:
+                        related_pairs.append((t, statement_event_map[str(stmt_id)]))
 
-            # Augment candidates with embedding-based nearest events.
-            if (
-                self.event_repository
-                and hasattr(incoming_event, "embedding")
-                and incoming_event.embedding
-            ):
+            # Augment via events that explicitly reference this triplet UUID in their stored list.
+            if getattr(incoming_triplet, "id", None) and self.event_repository:
                 try:
+                    events_by_triplet = await self.event_repository.list_events_by_triplet_ids(
+                        [str(incoming_triplet.id)]
+                    )
+                    for ev in events_by_triplet:
+                        converted = await self._to_temporal_event(ev)
+                        if converted:
+                            related_pairs.append((incoming_triplet, converted))
+                except Exception as exc:  # pylint: disable=broad-except
+                    logger.warning("Failed to fetch events by triplet ids: %s", exc)
+
+            # Augment candidates with embedding-based nearest events on statement embeddings.
+            if self._embedding_fn and self.event_repository:
+                try:
+                    query_embedding = await self._embedding_fn(incoming_event.statement)
                     nearest_events = await self.event_repository.semantic_search(
-                        incoming_event.embedding,
+                        query_embedding,
                         top_k=5,
                     )
                     for ev in nearest_events:
-                        if getattr(ev, "statement_id", None):
+                        converted = await self._to_temporal_event(ev)
+                        if converted and getattr(converted, "statement_id", None):
                             stmt_triplets = await self.triplet_repository.list_triplets_for_statement(
-                                ev.statement_id
+                                converted.statement_id
                             )
                             for trip in stmt_triplets:
-                                related_pairs.append((trip, ev))
+                                related_pairs.append((trip, converted))
                 except Exception as exc:  # pylint: disable=broad-except
-                    logger.warning("Semantic search for invalidation candidates failed: %s", exc)
-                    print("Semantic search for invalidation candidates failed: %s" % exc)
+                    logger.warning("Statement semantic search for invalidation candidates failed: %s", exc)
+                    print("Statement semantic search for invalidation candidates failed: %s" % exc)
 
             # Filter for temporal relevance
             all_relevant_events = self.select_temporally_relevant_events_for_invalidation(
@@ -530,6 +650,9 @@ class KnowledgeInvalidationService:
             )
 
             if not all_relevant_events:
+                logger.info("No relevant existing events found for incoming event %s", incoming_event.id)
+                print("No relevant existing events found for incoming event %s" % incoming_event.id)
+                logger.info("candidate_triplet_events: %s", related_pairs)
                 continue
 
             # Add task for parallel processing
@@ -537,11 +660,13 @@ class KnowledgeInvalidationService:
                 incoming_triplet=incoming_triplet,
                 incoming_event=incoming_event,
                 existing_triplet_events=all_relevant_events,
+                triplet_renderer=_render_triplet,
             )
             tasks.append(task)
 
         # Process all invalidations in parallel with pooling
         if not tasks:
+            logger.info("No invalidation tasks to process.")
             return [], []
 
         # Use pool size based on number of workers, but cap it
