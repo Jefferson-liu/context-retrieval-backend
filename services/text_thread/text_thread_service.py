@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import json
 import logging
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from infrastructure.context import ContextScope
 from infrastructure.database.repositories.text_thread_repository import TextThreadRepository
+from infrastructure.database.repositories.chunk_repository import ChunkRepository
+from infrastructure.ai.chunking import Chunker
 from services.knowledge import KnowledgeGraphService
 
 logger = logging.getLogger(__name__)
@@ -19,6 +22,8 @@ class TextThreadService:
         self.context = context
         self.thread_repository = TextThreadRepository(db, context)
         self.knowledge_service = KnowledgeGraphService(db, context)
+        self.chunker = Chunker()
+        self.chunk_repository = ChunkRepository(db, context)
 
     async def upload_text_thread(
         self,
@@ -28,23 +33,12 @@ class TextThreadService:
         messages: list | None = None,
     ):
         parts: list[str] = []
+        # we are storing the actual messages as json lines in the thread content, not just the text
         if messages:
             for msg in messages:
-                text_part = None
-                if isinstance(msg, dict):
-                    text_part = msg.get("text") or msg.get("content") or msg.get("message")
-                else:
-                    text_part = (
-                        getattr(msg, "text", None)
-                        or getattr(msg, "content", None)
-                        or getattr(msg, "message", None)
-                    )
-                if text_part:
-                    parts.append(str(text_part))
-                elif msg:
-                    parts.append(str(msg))
+                parts.append(json.dumps(msg))
 
-        thread_text = "\n".join(parts).strip()
+        thread_text = "\n".join(parts)
         if not thread_text:
             raise ValueError("Thread content is empty; provide messages with text.")
 
@@ -53,11 +47,25 @@ class TextThreadService:
             source_system=source_system,
             external_thread_id=external_thread_id,
             title=title,
-            thread_text=thread_text,
+            thread_messages=messages,
         )
+        # Persist chunks tied to the created document record for this thread.
+        doc_id = getattr(thread, "document_id", None)
+        if doc_id is None:
+            raise ValueError("Thread document was not created; cannot persist chunks.")
+
+        chunks = await self.chunker.chunk_text(thread_text, filename=f"thread_{thread.id}")
+        for order, chunk in enumerate(chunks):
+            await self.chunk_repository.create_chunk(
+                doc_id=doc_id,
+                chunk_order=order,
+                context_text="Text thread conversation between users",
+                content=chunk["content"],
+            )
+
         knowledge_result = await self.knowledge_service.refresh_text_thread_knowledge(
-            thread_id=thread.id,
+            thread_id=doc_id,
             thread_title=thread.title,
-            thread_text=thread.thread_text,
+            thread_messages=messages,
         )
         return {"thread_id": thread.id, "knowledge_result": knowledge_result}

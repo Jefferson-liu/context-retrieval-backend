@@ -9,10 +9,10 @@ class TemporalEvent(BaseModel):
     """Model representing a temporal event with statement, triplet, and validity information."""
 
     id: uuid.UUID = Field(default_factory=uuid.uuid4)
+    statement_id: uuid.UUID | None = None
     chunk_id: int | None = None
     statement: str
-    embedding: list[float] = Field(default_factory=lambda: [0.0] * 768)
-    triplets: list[uuid.UUID]
+    triplets: list[uuid.UUID] = Field(default_factory=list)
     valid_at: datetime | None = None
     invalid_at: datetime | None = None
     temporal_type: TemporalType
@@ -37,4 +37,6 @@ class TemporalEvent(BaseModel):
     def set_expired_at(self) -> "TemporalEvent":
         """Set expired_at if invalid_at is set and temporal_type is DYNAMIC."""
         self.expired_at = self.created_at if (self.invalid_at is not None) and (self.temporal_type == TemporalType.DYNAMIC) else None
+        if self.triplets is None:
+            self.triplets = []
         return self

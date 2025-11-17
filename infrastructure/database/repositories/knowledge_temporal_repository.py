@@ -35,6 +35,7 @@ class KnowledgeStatementRepository:
         temporal_type: str,
         valid_at,
         invalid_at,
+        embedding=None,
     ) -> KnowledgeStatement:
         statement = KnowledgeStatement(
             tenant_id=self.context.tenant_id,
@@ -46,6 +47,7 @@ class KnowledgeStatementRepository:
             temporal_type=temporal_type,
             valid_at=valid_at,
             invalid_at=invalid_at,
+            embedding=embedding,
         )
         self.db.add(statement)
         await self.db.flush()
@@ -213,19 +215,19 @@ class KnowledgeStatementTripletRepository:
         self,
         *,
         entity_ids: Sequence[int],
-        predicates: Sequence[str],
+        predicates: Optional[Sequence[str]] = None,
         statement_types: Optional[Sequence[str]] = None,
     ) -> List[Tuple[KnowledgeStatementTriplet, KnowledgeStatement]]:
-        """Return triplets (and their statements) related by entity and predicate.
+        """Return triplets (and their statements) related by entity.
 
         A triplet is included when it shares a subject or object entity from the
-        provided list and its predicate is one of the supplied predicates. Optionally
-        filter by statement types (e.g., FACT).
+        provided list. Optionally filter by predicates (if supplied) and statement
+        types (e.g., FACT).
         """
 
         unique_entities = {entity_id for entity_id in entity_ids if entity_id}
-        unique_predicates = {pred for pred in predicates if pred}
-        if not unique_entities or not unique_predicates:
+        unique_predicates = {pred for pred in predicates if pred} if predicates else None
+        if not unique_entities:
             return []
 
         stmt = (
@@ -243,9 +245,13 @@ class KnowledgeStatementTripletRepository:
                     KnowledgeStatementTriplet.subject_entity_id.in_(unique_entities),
                     KnowledgeStatementTriplet.object_entity_id.in_(unique_entities),
                 ),
-                KnowledgeStatementTriplet.predicate.in_(unique_predicates),
             )
         )
+
+        if unique_predicates:
+            stmt = stmt.where(
+                KnowledgeStatementTriplet.predicate.in_(unique_predicates),
+            )
 
         if statement_types:
             stmt = stmt.where(KnowledgeStatement.statement_type.in_(statement_types))

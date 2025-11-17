@@ -14,9 +14,6 @@ class Chunker:
         loop = asyncio.get_event_loop()
         headers_to_split_on = [
             ("#", "header 1"),
-            ("##", "header 2"),
-            ("###", "header 3"),
-            ("####", "header 4"),
         ]
         md_splitter = MarkdownHeaderTextSplitter(headers_to_split_on, strip_headers=False)
         text_splitter = RecursiveCharacterTextSplitter(

@@ -97,13 +97,11 @@ class TemporalKnowledgeAgent:
             temporal_range, raw_extraction = await asyncio.gather(temporal_range_task, extraction_task)
             if not raw_extraction:
                 return None, [], []
-            embedding = await self.get_statement_embedding(statement.statement)
             event = TemporalEvent(
                 chunk_id=chunk_id,
                 statement=statement.statement,
                 valid_at=getattr(temporal_range, "valid_at", None),
                 invalid_at=getattr(temporal_range, "invalid_at", None),
-                embedding=embedding,
                 triplets=[],
                 temporal_type=statement.temporal_type,
                 statement_type=statement.statement_type,
@@ -154,6 +152,8 @@ class TemporalKnowledgeAgent:
             logger.info(f"No statements extracted from chunk. {chunk_text}")
             print(f"No statements extracted from chunk. {chunk_text}")
             return []
+        
+        logger.info(f"Extracted {raw_statements}")
 
         normalized: List[RawStatement] = []
         for item in raw_statements:

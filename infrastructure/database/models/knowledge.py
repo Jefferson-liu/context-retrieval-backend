@@ -231,6 +231,7 @@ class KnowledgeStatement(Base):
 	temporal_type = Column(String(32), nullable=False)
 	valid_at = Column(DateTime(timezone=True), nullable=True)
 	invalid_at = Column(DateTime(timezone=True), nullable=True)
+	embedding = Column(Vector(settings.EMBEDDING_VECTOR_DIM), nullable=True)
 	created_at = Column(
 		DateTime(timezone=True),
 		default=lambda: datetime.now(timezone.utc),
@@ -278,16 +279,12 @@ class KnowledgeEvent(Base):
 	statement_id = Column(
 		PGUUID(as_uuid=True),
 		ForeignKey("knowledge_statements.id", ondelete="CASCADE"),
-		nullable=True,
+		nullable=False,
 		index=True,
 	)
-	statement = Column(Text, nullable=False)
 	triplets = Column(JSON, nullable=False, default=list)
-	statement_type = Column(String(32), nullable=False)
-	temporal_type = Column(String(32), nullable=False)
 	valid_at = Column(DateTime(timezone=True), nullable=True)
 	invalid_at = Column(DateTime(timezone=True), nullable=True)
-	embedding = Column(Vector(settings.EMBEDDING_VECTOR_DIM), nullable=True)
 	invalidated_by = Column(
 		PGUUID(as_uuid=True),
 		ForeignKey("knowledge_events.id", ondelete="SET NULL"),

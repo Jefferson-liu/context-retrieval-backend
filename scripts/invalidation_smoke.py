@@ -81,10 +81,11 @@ async def main():
         triplet_repository=_StubTripletRepo(),
         invalidation_repository=_StubInvalidationRepo(),
         event_repository=None,
+        embedding_fn=None,
     )
 
     # Stub invalidation_step to always invalidate primary with secondary.
-    async def _fake_invalidation_step(primary_event, primary_triplet, secondary_event, secondary_triplet):
+    async def _fake_invalidation_step(primary_event, primary_triplet, secondary_event, secondary_triplet, primary_triplet_str=None, secondary_triplet_str=None):
         return primary_event.model_copy(
             update={
                 "invalid_at": secondary_event.valid_at,

@@ -24,6 +24,7 @@ class TextThread(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     tenant_id = Column(Integer, ForeignKey("tenants.id", ondelete="RESTRICT"), nullable=False, index=True)
     project_id = Column(Integer, ForeignKey("projects.id", ondelete="RESTRICT"), nullable=False, index=True)
+    document_id = Column(Integer, ForeignKey("documents.id", ondelete="CASCADE"), nullable=True, index=True)
     owner_user_id = Column(String(255), nullable=False, index=True)
     user_product_id = Column(Integer, ForeignKey("user_products.id", ondelete="SET NULL"), nullable=True, index=True)
     source_system = Column(String(120), nullable=False)
@@ -47,6 +48,7 @@ class TextThread(Base):
 
     tenant = relationship(Tenant)
     project = relationship(Project)
+    document = relationship("Document")
     product = relationship(UserProduct)
     messages = relationship("TextThreadMessage", back_populates="thread", cascade="all, delete-orphan")
 

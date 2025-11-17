@@ -14,5 +14,5 @@ class UploadTextThreadRequest(BaseModel):
     external_thread_id: str | None = Field(default=None, description="Optional external thread id")
     messages: List[TextThreadMessageInput] = Field(
         default_factory=list,
-        description="Optional list of messages to build the thread text",
+        description="list of messages to build the thread text",
     )

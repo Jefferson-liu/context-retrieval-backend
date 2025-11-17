@@ -51,13 +51,9 @@ Do NOT return any explanations or additional text. ONLY return the boolean value
 )
 
 
-def build_invalidation_prompt(
-    primary_statement: TemporalEvent,
-    primary_triplet: str,
-    secondary_statement: TemporalEvent,
-    secondary_triplet: str,
-):
-    events_block = format_events(primary_statement, primary_triplet, secondary_statement, secondary_triplet)
+def build_invalidation_prompt(primary_event: TemporalEvent, primary_triplet: str, secondary_event: TemporalEvent, secondary_triplet: str):
+    events_block = format_events(
+        primary_event, primary_triplet, secondary_event, secondary_triplet)
     return invalidation_prompt.partial(
         events_block=events_block
     )

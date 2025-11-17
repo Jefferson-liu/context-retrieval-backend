@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime, timezone
-from typing import Dict, Optional
+from typing import Dict, Optional, List
+from schemas.requests.text_thread import TextThreadMessageInput
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -31,6 +32,7 @@ from services.knowledge.invalidation_service import KnowledgeInvalidationService
 from services.knowledge.temporal_agent import (
     TemporalKnowledgeAgent,
 )
+from infrastructure.ai.model_factory import get_dummy_call_count
 from schemas.knowledge_graph.entities.raw_entity import RawEntity
 from schemas.knowledge_graph.entities.entity import Entity
 from schemas.knowledge_graph.enums.types import StatementType
@@ -68,6 +70,8 @@ class KnowledgeGraphService:
             invalidation_repository=KnowledgeStatementInvalidationRepository(
                 db, context),
             event_repository=self.event_repository,
+            entity_repository=self.entity_repository,
+            embedding_fn=self.temporal_agent.get_statement_embedding,
         )
 
     async def refresh_document_knowledge(
@@ -75,6 +79,7 @@ class KnowledgeGraphService:
         document_id: int,
         document_name: str,
         document_content: str,
+        use_invalidation: bool = True,
     ) -> None:
         document = await self.document_repository.get_document_by_id(document_id)
         if not document:
@@ -106,6 +111,47 @@ class KnowledgeGraphService:
                 chunks=dict(chunks_payload),
                 reference_timestamp=reference_timestamp,
             )
+            try:
+                events_log = [
+                    {
+                        "id": str(getattr(evt, "id", None)),
+                        "statement": getattr(evt, "statement", None),
+                        "temporal_type": getattr(evt, "temporal_type", None),
+                        "statement_type": getattr(evt, "statement_type", None),
+                        "invalidated_by": getattr(evt, "invalidated_by", None),
+                        "invalid_at": getattr(evt, "invalid_at", None),
+                    }
+                    for evt in all_events
+                ]
+                triplets_log = [
+                    {
+                        "event_id": str(getattr(tr, "event_id", None)),
+                        "subject": getattr(tr, "subject_name", None),
+                        "object": getattr(tr, "object_name", None),
+                        "predicate": getattr(tr, "predicate", None),
+                    }
+                    for tr in all_triplets
+                ]
+                entities_log = [
+                    {
+                        "id": getattr(ent, "id", None),
+                        "name": getattr(ent, "name", None),
+                        "type": getattr(ent, "type", None),
+                    }
+                    for ent in all_entities
+                ]
+                logger.info(
+                    "LLM extract_file_events details: events=%s triplets=%s entities=%s",
+                    events_log,
+                    triplets_log,
+                    entities_log,
+                )
+                print(
+                    "LLM extract_file_events details: events=%s triplets=%s entities=%s"
+                    % (events_log, triplets_log, entities_log)
+                )
+            except Exception:
+                pass
         except Exception as exc:  # pylint: disable=broad-except
             logger.exception(
                 "Temporal agent failed for document_id=%s: %s", document_id, exc
@@ -146,10 +192,13 @@ class KnowledgeGraphService:
             if triplet.object_name in entity_id_map:
                 triplet.object_id = entity_id_map[triplet.object_name]
                 
-        final_events, changed_events = await self.batch_process_invalidation(
-            all_events=all_events,
-            all_triplets=all_triplets,
-        )
+        if use_invalidation:
+            final_events, changed_events = await self.batch_process_invalidation(
+                all_events=all_events,
+                all_triplets=all_triplets,
+            )
+        else:
+            final_events, changed_events = all_events, []
         
         # Persist incoming events and collect their DB IDs.
         for event in final_events:
@@ -160,6 +209,32 @@ class KnowledgeGraphService:
                 triplets=all_triplets,
                 entities=all_entities,
             )
+
+        # Build invalidation payload from both updated incoming events and changed existing events.
+        invalidated_events_payload = [
+            {
+                "event_id": str(evt.id),
+                "statement": evt.statement,
+                "valid_at": getattr(evt, "valid_at", None),
+                "invalid_at": getattr(evt, "invalid_at", None),
+            }
+            for evt in final_events
+            if getattr(evt, "invalidated_by", None) is not None
+        ]
+        invalidated_events_payload.extend(
+            {
+                "event_id": str(c.id),
+                "statement": c.statement,
+                "valid_at": getattr(c, "valid_at", None),
+                "invalid_at": getattr(c, "invalid_at", None),
+            }
+            for c in changed_events
+        )
+        # Deduplicate on event_id while preserving order.
+        seen_inv: set[str] = set()
+        invalidated_events_payload = [
+            item for item in invalidated_events_payload if not (item["event_id"] in seen_inv or seen_inv.add(item["event_id"]))
+        ]
 
         # Handle conflicts based on auto-invalidation setting.
         if changed_events:
@@ -179,6 +254,12 @@ class KnowledgeGraphService:
                     if not updated:
                         logger.warning("Failed to persist invalidation for event %s", changed.id)
                         print("Failed to persist invalidation for event %s" % changed.id)
+                result_payload = {"status": "success", "invalidated_events": invalidated_events_payload}
+                try:
+                    result_payload["dummy_call_count"] = get_dummy_call_count()
+                except Exception:
+                    pass
+                return result_payload
             else:
                 batch = await self.event_invalidation_batch_repository.create_batch(
                     [
@@ -211,37 +292,91 @@ class KnowledgeGraphService:
                     ],
                 }
 
-        return {
-            "status": "success",
-            "invalidated_events": [
-                {
-                    "event_id": str(c.id),
-                    "statement": c.statement,
-                    "valid_at": getattr(c, "valid_at", None),
-                    "invalid_at": getattr(c, "invalid_at", None),
-                }
-                for c in changed_events
-            ],
-        }
+        result_payload = {"status": "success", "invalidated_events": invalidated_events_payload}
+        try:
+            result_payload["dummy_call_count"] = get_dummy_call_count()
+        except Exception:
+            pass
+        return result_payload
 
     async def refresh_text_thread_knowledge(
         self,
-        *,
         thread_id: int,
         thread_title: str | None,
-        thread_text: str,
+        thread_messages: List[TextThreadMessageInput],
     ) -> dict:
-        """Extract and persist knowledge from a text thread (without creating documents/chunks)."""
-        chunks_payload = [(None, thread_text)]
+        """Extract and persist knowledge from a text thread after creating chunks (doc-backed)."""
+        # Fetch chunks tied to the thread's backing document.
+        chunks = await self.chunk_repository.get_chunks_by_doc_id(thread_id)
+        if not chunks:
+            # Fallback to raw messages if chunks are missing.
+            chunks_payload = [(None, "\n".join(msg.get("text", "") for msg in thread_messages))]
+        else:
+            chunks_payload = [(chunk.id, chunk.content or "") for chunk in chunks]
+
         reference_timestamp = self._format_reference_timestamp(None)
         display_name = thread_title or f"Thread {thread_id}"
 
         try:
+            logger.info("Text thread extraction start: file_name=%s chunks=%s", display_name, chunks_payload)
+            print("Text thread extraction start: file_name=%s chunks=%s" % (display_name, chunks_payload))
             all_events, all_triplets, all_entities = await self.temporal_agent.extract_file_events(
                 file_name=display_name,
                 chunks=dict(chunks_payload),
                 reference_timestamp=reference_timestamp,
             )
+            logger.info(
+                "LLM extract_file_events result: events=%s triplets=%s entities=%s",
+                len(all_events),
+                len(all_triplets),
+                len(all_entities),
+            )
+            print(
+                "LLM extract_file_events result: events=%s triplets=%s entities=%s"
+                % (len(all_events), len(all_triplets), len(all_entities))
+            )
+            try:
+                events_log = [
+                    {
+                        "id": str(getattr(evt, "id", None)),
+                        "statement": getattr(evt, "statement", None),
+                        "temporal_type": getattr(evt, "temporal_type", None),
+                        "statement_type": getattr(evt, "statement_type", None),
+                        "invalidated_by": getattr(evt, "invalidated_by", None),
+                        "invalid_at": getattr(evt, "invalid_at", None),
+                    }
+                    for evt in all_events
+                ]
+                triplets_log = [
+                    {
+                        "event_id": str(getattr(tr, "event_id", None)),
+                        "subject": getattr(tr, "subject_name", None),
+                        "object": getattr(tr, "object_name", None),
+                        "predicate": getattr(tr, "predicate", None),
+                    }
+                    for tr in all_triplets
+                ]
+                entities_log = [
+                    {
+                        "id": getattr(ent, "id", None),
+                        "name": getattr(ent, "name", None),
+                        "type": getattr(ent, "type", None),
+                    }
+                    for ent in all_entities
+                ]
+                logger.info(
+                    "LLM extract_file_events details: events=%s triplets=%s entities=%s",
+                    events_log,
+                    triplets_log,
+                    entities_log,
+                )
+                print(
+                    "LLM extract_file_events details: events=%s triplets=%s entities=%s"
+                    % (events_log, triplets_log, entities_log)
+                )
+            except Exception as e:
+                print("Failed to log LLM extract_file_events details: %s" % e)
+                raise e
         except Exception as exc:  # pylint: disable=broad-except
             logger.exception(
                 "Temporal agent failed for thread_id=%s: %s", thread_id, exc
@@ -283,35 +418,76 @@ class KnowledgeGraphService:
             all_events=all_events,
             all_triplets=all_triplets,
         )
+        logger.info(
+            "Invalidation batch result: final_events=%s changed_events=%s",
+            len(final_events),
+            len(changed_events),
+        )
+        print(
+            "Invalidation batch result: final_events=%s changed_events=%s"
+            % (len(final_events), len(changed_events))
+        )
 
+        created_event_ids: set[str] = set()
         for event in final_events:
-            await self._persist_event(
+            created_id = await self._persist_event(
                 document_id=None,
                 chunk_id=event.chunk_id,
                 event=event,
                 triplets=all_triplets,
                 entities=all_entities,
             )
+            created_event_ids.add(created_id)
+
+        # Build invalidation payload from both updated incoming events and changed existing events.
+        invalidated_payload = [
+            {
+                "event_id": str(evt.id),
+                "statement": evt.statement,
+                "valid_at": getattr(evt, "valid_at", None),
+                "invalid_at": getattr(evt, "invalid_at", None),
+            }
+            for evt in final_events
+            if getattr(evt, "invalidated_by", None) is not None
+        ]
+        invalidated_payload.extend(
+            {
+                "event_id": str(c.id),
+                "statement": c.statement,
+                "valid_at": getattr(c, "valid_at", None),
+                "invalid_at": getattr(c, "invalid_at", None),
+            }
+            for c in changed_events
+        )
+        seen_ids: set[str] = set()
+        invalidated_payload = [
+            item for item in invalidated_payload if not (item["event_id"] in seen_ids or seen_ids.add(item["event_id"]))
+        ]
 
         if changed_events:
-            invalidated_payload = [
-                {
-                    "event_id": str(c.id),
-                    "statement": c.statement,
-                    "valid_at": getattr(c, "valid_at", None),
-                    "invalid_at": getattr(c, "invalid_at", None),
-                }
-                for c in changed_events
-            ]
             if settings.KNOWLEDGE_AUTO_INVALIDATION:
                 for changed in changed_events:
+                    # Skip applying invalidation if the referenced event_id is not yet persisted in this batch.
+                    inv_by = getattr(changed, "invalidated_by", None)
+                    if inv_by and (str(inv_by) not in created_event_ids):
+                        logger.warning(
+                            "Skipping invalidation for event %s because invalidated_by %s was not created in this batch",
+                            changed.id,
+                            inv_by,
+                        )
+                        print("Skipping invalidation for event %s because invalidated_by %s was not created in this batch" % (changed.id, inv_by))
+                        continue
                     await self.event_repository.update_invalidation(
                         event_id=changed.id,
                         invalid_at=getattr(changed, "invalid_at", None),
                         invalidated_by=getattr(changed, "invalidated_by", None),
                         expired_at=getattr(changed, "expired_at", None),
                     )
-                return {"status": "success", "invalidated_events": invalidated_payload}
+                return {
+                    "status": "success",
+                    "invalidated_events": invalidated_payload,
+                    "batch_id": None if invalidated_payload else None,
+                }
             else:
                 batch = await self.event_invalidation_batch_repository.create_batch(
                     [
@@ -338,7 +514,17 @@ class KnowledgeGraphService:
                     ],
                 }
 
-        return {"status": "success", "invalidated_events": []}
+        result_payload = {
+            "status": "success",
+            "invalidated_events": invalidated_payload,
+        }
+        if invalidated_payload:
+            result_payload["batch_id"] = None
+        try:
+            result_payload["dummy_call_count"] = get_dummy_call_count()
+        except Exception:
+            pass
+        return result_payload
 
     async def _persist_event(
         self,
@@ -348,10 +534,21 @@ class KnowledgeGraphService:
         event: TemporalEvent,
         triplets: list[Triplet],
         entities: list[Entity],  # kept for parity with caller; already stored upstream
-    ) -> None:
-        """Persist a single event along with its statement and triplets."""
+    ) -> str:
+        """Persist a single event along with its statement and triplets.
 
-        # Create the knowledge_statement row.
+        Returns:
+            The created event ID (string).
+        """
+
+        # Create the knowledge_statement row (embed statement text for search).
+        statement_embedding = None
+        try:
+            statement_embedding = await self.temporal_agent.get_statement_embedding(event.statement)
+        except Exception:
+            logger.warning("Failed to embed statement for persistence; continuing without embedding")
+            print("Failed to embed statement for persistence; continuing without embedding")
+
         statement = await self.statement_repository.create_statement(
             document_id=document_id,
             chunk_id=chunk_id,
@@ -360,6 +557,7 @@ class KnowledgeGraphService:
             temporal_type=self._enum_value(event.temporal_type),
             valid_at=event.valid_at,
             invalid_at=event.invalid_at,
+            embedding=statement_embedding,
         )
 
         # Persist triplets associated with this event.
@@ -441,13 +639,10 @@ class KnowledgeGraphService:
         created_event = await self.event_repository.create_event(
             chunk_id=chunk_id,
             statement_id=statement.id,
-            statement_text=event.statement,
             triplets=created_triplet_ids,
-            statement_type=self._enum_value(event.statement_type),
-            temporal_type=self._enum_value(event.temporal_type),
             valid_at=event.valid_at,
             invalid_at=event.invalid_at,
-            embedding=getattr(event, "embedding", None),
+            invalidated_by=getattr(event, "invalidated_by", None),
         )
 
         # Backfill provenance: associate entities with this event when missing.
@@ -467,6 +662,8 @@ class KnowledgeGraphService:
                 entity_id,
                 event_id=created_event.id,
             )
+
+        return str(created_event.id)
 
     @staticmethod
     def _enum_value(value):
@@ -490,6 +687,8 @@ class KnowledgeGraphService:
                 - final_events: All events (updated incoming events)
                 - events_to_update: Existing events that need DB updates
         """
+        logger.info("Starting batch invalidation processing for %s events and %s triplets", len(all_events), len(all_triplets))
+        print("Starting batch invalidation processing for %s events and %s triplets" % (len(all_events), len(all_triplets)))
         def _get_fact_triplets(
             all_events: list[TemporalEvent],
             all_triplets: list[Triplet],
@@ -503,6 +702,9 @@ class KnowledgeGraphService:
             return [triplet for triplet in all_triplets if triplet.event_id in fact_event_ids]
         # Prepare a list of triplets whose associated event is a FACT and not ATEMPORAL
         fact_triplets = _get_fact_triplets(all_events, all_triplets)
+        logger.info("Filtered %s fact triplets for invalidation processing", len(fact_triplets))
+        print("Filtered %s fact triplets for invalidation processing" % len(fact_triplets))
+
         if not fact_triplets:
             return all_events, []
 
@@ -527,14 +729,59 @@ class KnowledgeGraphService:
                     f"Warning: Fact triplet {triplet.id} has no event_id, skipping invalidation")
 
         if not valid_fact_triplets:
+            logger.info("No valid fact triplets found for invalidation processing")
+            print("No valid fact triplets found for invalidation processing")
             return all_events, []
 
         # Batch fetch all related existing triplets and events
-        existing_triplets, existing_events = await fetch_related_triplets_and_events(
+        existing_triplets, existing_statements = await fetch_related_triplets_and_events(
             triplet_repository=self.triplet_repository,
             incoming_triplets=valid_fact_triplets,
             statement_type=StatementType.FACT,
         )
+        statement_ids = [stmt.id for stmt in existing_statements if getattr(stmt, "id", None)]
+        existing_events = []
+        logger.info("Fetching existing events for %s statements", len(statement_ids))
+        print("Fetching existing events for %s statements" % len(statement_ids))
+        logger.info("Existing statements: %s", existing_statements)
+        print("Existing statements: %s" % existing_statements)
+        logger.info("Existing Triplets: %s", existing_triplets)
+        print("Existing Triplets: %s" % existing_triplets)
+        if statement_ids:
+            existing_events = await self.event_repository.list_events_for_statement_ids(statement_ids)
+        if existing_events:
+            statement_lookup = {
+                str(stmt.id): stmt
+                for stmt in existing_statements
+                if getattr(stmt, "id", None)
+            }
+            converted_existing_events: list[TemporalEvent] = []
+            for ev in existing_events:
+                stmt = statement_lookup.get(str(getattr(ev, "statement_id", None))) or getattr(ev, "statement_ref", None)
+                if not stmt:
+                    logger.warning("Existing event %s missing statement for invalidation; skipping", getattr(ev, "id", None))
+                    print("Existing event %s missing statement for invalidation; skipping" % getattr(ev, "id", None))
+                    continue
+                stmt_type = stmt.statement_type
+                temp_type = stmt.temporal_type
+                if isinstance(stmt_type, str):
+                    stmt_type = StatementType(stmt_type)
+                if isinstance(temp_type, str):
+                    temp_type = TemporalType(temp_type)
+                converted_existing_events.append(
+                    TemporalEvent(
+                        id=ev.id,
+                        statement_id=getattr(ev, "statement_id", None),
+                        statement=stmt.statement,
+                        statement_type=stmt_type,
+                        temporal_type=temp_type,
+                        valid_at=ev.valid_at or stmt.valid_at,
+                        invalid_at=ev.invalid_at or stmt.invalid_at,
+                        invalidated_by=getattr(ev, "invalidated_by", None),
+                        chunk_id=getattr(ev, "chunk_id", None),
+                    )
+                )
+            existing_events = converted_existing_events
 
         # Process all invalidations in parallel
         updated_incoming_fact_events, changed_existing_events = await self.invalidation_service.process_invalidations_in_parallel(

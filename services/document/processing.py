@@ -54,7 +54,12 @@ class DocumentProcessingService:
             doc_id = db_document.id
 
             # Step 2: Process the document (chunk and embed)
-            knowledge_result = await self.process_document(doc_id, content, doc_name=doc_name)
+            knowledge_result = await self.process_document(
+                doc_id,
+                content,
+                doc_name=doc_name,
+                use_invalidation=False,
+            )
 
             file_path = await self.document_file_service.write_document(doc_id, doc_name, content)
             if file_path:
@@ -76,7 +81,13 @@ class DocumentProcessingService:
             print("Upload pipeline failed for doc=%s: %s" % (doc_name, exc))
             raise
 
-    async def process_document(self, document_id: int, content: str, doc_name: str | None = None):
+    async def process_document(
+        self,
+        document_id: int,
+        content: str,
+        doc_name: str | None = None,
+        use_invalidation: bool = True,
+    ):
         """Process a document: create chunks and embeddings."""
         # Chunk the content
         chunks = await self.chunker.chunk_text(content)
@@ -122,9 +133,10 @@ class DocumentProcessingService:
 
         await self.vector_store.upsert_vectors(records)
         knowledge_result = await self.knowledge_service.refresh_document_knowledge(
-            document_id,
-            doc_name or "",
-            content,
+            document_id=document_id,
+            document_name=doc_name or "",
+            document_content=content,
+            use_invalidation=use_invalidation,
         )
         
         await self.document_summary_service.upsert_summary(

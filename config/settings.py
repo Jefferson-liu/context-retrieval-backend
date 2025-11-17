@@ -65,10 +65,10 @@ EMBEDDING_MODEL = "claude-3-haiku-20240307"
 COMMIT_MESSAGE_MODEL = "claude-3-haiku-20240307"
 CONTEXT_SUMMARIZATION_MODEL = "claude-3-haiku-20240307"
 
-STATEMENT_EXTRACTION_MODEL = "amazon.nova-pro-v1:0"
-DATE_EXTRACTION_MODEL = "amazon.nova-pro-v1:0"
-TRIPLET_EXTRACTION_MODEL = "amazon.nova-pro-v1:0"
-KNOWLEDGE_INVALIDATION_MODEL = "amazon.nova-pro-v1:0"
+STATEMENT_EXTRACTION_MODEL = "amazon.nova-micro-v1:0"
+DATE_EXTRACTION_MODEL = "gpt-5-nano"
+TRIPLET_EXTRACTION_MODEL = "amazon.nova-micro-v1:0"
+KNOWLEDGE_INVALIDATION_MODEL = "gpt-5-nano"
 
 #maybe sunset these in favor of the knowledge graph models?
 CLAUSE_FORMING_MODEL = "claude-3-haiku-20240307"
