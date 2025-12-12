@@ -61,6 +61,21 @@ class KnowledgeGraphService:
         self.event_invalidation_batch_repository = KnowledgeEventInvalidationBatchRepository(
             db, context
         )
+        # A dedicated sessionmaker for semantic search to avoid interfering with request-scoped sessions.
+        semantic_engine = getattr(self.event_repository.db, "bind", None)
+        semantic_sessionmaker = None
+        if semantic_engine:
+            from sqlalchemy.ext.asyncio import async_sessionmaker
+
+            semantic_sessionmaker = async_sessionmaker(semantic_engine, expire_on_commit=False)
+            if getattr(settings, "DEBUG", False):
+                print("Semantic sessionmaker initialized for invalidation search")
+
+        from services.knowledge.event_semantic_search_service import EventSemanticSearchService
+
+        self.semantic_search_service = None
+        if semantic_sessionmaker:
+            self.semantic_search_service = EventSemanticSearchService(semantic_sessionmaker, context)
         self.document_repository = DocumentRepository(db, context)
         self.chunk_repository = ChunkRepository(db, context)
         self.temporal_agent = TemporalKnowledgeAgent()
@@ -72,6 +87,7 @@ class KnowledgeGraphService:
             event_repository=self.event_repository,
             entity_repository=self.entity_repository,
             embedding_fn=self.temporal_agent.get_statement_embedding,
+            semantic_search_service=self.semantic_search_service,
         )
 
     async def refresh_document_knowledge(
@@ -465,6 +481,18 @@ class KnowledgeGraphService:
         ]
 
         if changed_events:
+            batch = await self.event_invalidation_batch_repository.create_batch(
+                [
+                    {
+                        "event_id": str(changed.id),
+                        "new_event_id": None,
+                        "reason": "Conflicts with newly ingested event",
+                        "suggested_invalid_at": getattr(changed, "invalid_at", None),
+                    }
+                    for changed in changed_events
+                ]
+            )
+
             if settings.KNOWLEDGE_AUTO_INVALIDATION:
                 for changed in changed_events:
                     # Skip applying invalidation if the referenced event_id is not yet persisted in this batch.
@@ -483,23 +511,17 @@ class KnowledgeGraphService:
                         invalidated_by=getattr(changed, "invalidated_by", None),
                         expired_at=getattr(changed, "expired_at", None),
                     )
+                    if getattr(changed, "statement_id", None):
+                        await self.statement_repository.update_invalid_at(
+                            str(changed.statement_id),
+                            invalid_at=getattr(changed, "invalid_at", None),
+                        )
                 return {
                     "status": "success",
                     "invalidated_events": invalidated_payload,
-                    "batch_id": None if invalidated_payload else None,
+                    "batch_id": str(batch.id) if invalidated_payload else None,
                 }
             else:
-                batch = await self.event_invalidation_batch_repository.create_batch(
-                    [
-                        {
-                            "event_id": str(changed.id),
-                            "new_event_id": None,
-                            "reason": "Conflicts with newly ingested event",
-                            "suggested_invalid_at": getattr(changed, "invalid_at", None),
-                        }
-                        for changed in changed_events
-                    ]
-                )
                 return {
                     "status": "conflicts",
                     "batch_id": str(batch.id),
@@ -518,8 +540,6 @@ class KnowledgeGraphService:
             "status": "success",
             "invalidated_events": invalidated_payload,
         }
-        if invalidated_payload:
-            result_payload["batch_id"] = None
         try:
             result_payload["dummy_call_count"] = get_dummy_call_count()
         except Exception:
@@ -826,6 +846,14 @@ class KnowledgeGraphService:
             if not updated:
                 logger.warning("Failed to persist batch invalidation for event %s", item.event_id)
                 print("Failed to persist batch invalidation for event %s" % item.event_id)
+                continue
+            # Propagate invalid_at to the linked statement.
+            event_obj = await self.event_repository.get_event_by_id(item.event_id)
+            if event_obj and getattr(event_obj, "statement_id", None):
+                await self.statement_repository.update_invalid_at(
+                    str(event_obj.statement_id),
+                    invalid_at=item.suggested_invalid_at or datetime.now(timezone.utc),
+                )
         await self.event_invalidation_batch_repository.mark_applied(
             batch_id, approved_by=approved_by
         )

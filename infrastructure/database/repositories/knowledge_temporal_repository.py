@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Dict, List, Optional, Sequence, Tuple
 
 from sqlalchemy import delete, or_, select

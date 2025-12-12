@@ -23,6 +23,7 @@ from infrastructure.database.repositories.knowledge_event_repository import (
     KnowledgeEventRepository,
 )
 from infrastructure.database.repositories.knowledge_repository import KnowledgeEntityRepository
+from services.knowledge.event_semantic_search_service import EventSemanticSearchService
 from config import settings
 from prompts.knowledge_graph.invalidation import (
     build_invalidation_prompt
@@ -50,6 +51,7 @@ class KnowledgeInvalidationService:
         event_repository: KnowledgeEventRepository | None = None,
         entity_repository: KnowledgeEntityRepository | None = None,
         embedding_fn: Callable[[str], Awaitable[list[float]]] | None = None,
+        semantic_search_service: EventSemanticSearchService | None = None,
         auto_apply: bool | None = None,
         max_workers: int = 2,
     ) -> None:
@@ -59,6 +61,7 @@ class KnowledgeInvalidationService:
         self.event_repository = event_repository
         self.entity_repository = entity_repository
         self._embedding_fn = embedding_fn
+        self._semantic_search_service = semantic_search_service
         self.auto_apply = (
             settings.KNOWLEDGE_AUTO_INVALIDATION if auto_apply is None else auto_apply
         )
@@ -623,14 +626,11 @@ class KnowledgeInvalidationService:
                 except Exception as exc:  # pylint: disable=broad-except
                     logger.warning("Failed to fetch events by triplet ids: %s", exc)
 
-            # Augment candidates with embedding-based nearest events on statement embeddings.
-            if self._embedding_fn and self.event_repository:
+            # Augment candidates with embedding-based nearest events on statement embeddings via search service.
+            if self._embedding_fn and self._semantic_search_service:
                 try:
                     query_embedding = await self._embedding_fn(incoming_event.statement)
-                    nearest_events = await self.event_repository.semantic_search(
-                        query_embedding,
-                        top_k=5,
-                    )
+                    nearest_events = await self._semantic_search_service.search(query_embedding, top_k=5)
                     for ev in nearest_events:
                         converted = await self._to_temporal_event(ev)
                         if converted and getattr(converted, "statement_id", None):

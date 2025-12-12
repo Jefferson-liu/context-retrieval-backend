@@ -116,3 +116,12 @@ class KnowledgeEventRepository:
         )
         result = await self.db.execute(stmt)
         return result.scalars().all()
+
+    async def get_event_by_id(self, event_id: UUID) -> Optional[KnowledgeEvent]:
+        stmt = select(KnowledgeEvent).where(
+            KnowledgeEvent.id == event_id,
+            KnowledgeEvent.tenant_id == self.context.tenant_id,
+            KnowledgeEvent.project_id.in_(self.context.project_ids),
+        )
+        result = await self.db.execute(stmt)
+        return result.scalar_one_or_none()
