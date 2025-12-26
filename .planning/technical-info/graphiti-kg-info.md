@@ -17,6 +17,7 @@ Use Graphiti (Neo4j-backed) as the knowledge graph for ingesting, storing, and r
 - Ingestion adapter mapping extracted items to Graphiti episodes/triples with `group_id` = tenant+product; supports optional custom entity/edge types and edge_type_map for structured extraction.
 - Retrieval adapter for hybrid search (semantic + keyword) with low latency; no LLM in the hot path.
 - Feature flag to enable Graphiti-backed KG while retaining legacy fallback until cutover.
+- Settings-driven OpenAI key: `get_graphiti_client` now sources `OPENAI_API_KEY` from settings and sets it for Graphiti LLM-backed ingestion.
 
 ## Data Model & Scoping
 - Namespace via `group_id`: combine tenant_id and product_id (e.g., `tenant:product`), with option to operate tenant-only if product-as-metadata mode is required.
@@ -29,3 +30,6 @@ Use Graphiti (Neo4j-backed) as the knowledge graph for ingesting, storing, and r
 ## Cross-Feature Dependencies
 - Depends on upstream auth/context provider for tenant/product/user scope and roles (placeholders).
 - Exposes results to the assistant/Slackbot query flow; must respect scope in all searches.
+
+## Maintenance / Troubleshooting
+- Use `python -m scripts.reset_storage` (with `--force` to skip confirmation) to drop/recreate the Postgres tables **and** invoke `graphiti_core.utils.maintenance.graph_data_operations.clear_data` followed by `Graphiti.build_indices_and_constraints()`. This wipes all tenants' KG data, so only run in local/testing environments.

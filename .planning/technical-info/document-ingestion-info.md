@@ -35,7 +35,11 @@ Persist documents and text threads, chunk/contextualize them, generate embedding
 ## Data Flow (Text Thread Ingestion)
 - `TextThreadService.upload_text_thread`:
   - Stores thread (owner user, source system, external_thread_id).
-  - Chunks JSON-lines text into document-backed chunks.
+  - Normalizes Slack payloads to a minimal schema (`thread_ts`, `channel`, per-message `{ts, thread_ts, user_id, display_name, text}`), serializes that canonical JSON for storage/Graphiti, and derives `reference_time` from the earliest Slack timestamp (falls back to ingestion time only if missing).
+  - Chunks threads with LangChain's `RecursiveJsonSplitter` on a canonical JSON payload (messages serialized to strings to keep them atomic). No mid-message splits; chunk size ~1500 chars. Each chunk captures `first_ts` from its earliest message for sequencing/reference_time.
+  - Sends one Graphiti episode per chunk (reference_time = chunk.first_ts if available), still within the tenant/user group_id.
+  - After each Graphiti episode, attaches a deterministic “Thread” anchor node (labels=`Thread`) keyed by `thread_ts|channel` within the same tenant/user `group_id`, and links all extracted entities to it with `mentioned_in_thread` edges (edge attributes include thread key/channel/start_time). This enables per-thread retrieval without changing partitions.
+  - Thread ingestion responses include the aggregated Graphiti entities and edges from all chunk episodes, plus a filtered list of invalidated edges (edges with `invalid_at` or `expired_at` set).
   - Calls `KnowledgeGraphService.refresh_text_thread_knowledge` for extraction and optional invalidation.
 
 ## Tenancy / Scope

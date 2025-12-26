@@ -23,6 +23,8 @@ SessionLocal = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSe
 
 async def init_db() -> None:
     """Create tables if they do not exist."""
+    # Import models so they are registered on the Base metadata before create_all.
+    import infrastructure.models  # noqa: F401
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
 

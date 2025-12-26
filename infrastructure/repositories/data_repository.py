@@ -17,11 +17,13 @@ class DataRepository:
     async def create_with_chunks(
         self,
         *,
+        tenant_id: str,
+        user_id: str,
         title: str,
         body: str,
         chunks: Sequence[str],
     ) -> DataRecord:
-        record = DataRecord(title=title, body=body)
+        record = DataRecord(tenant_id=tenant_id, user_id=user_id, title=title, body=body)
         self.session.add(record)
         await self.session.flush()
 
@@ -37,18 +39,24 @@ class DataRepository:
         await self.session.refresh(record)
         return record
 
-    async def list(self) -> List[DataRecord]:
-        stmt = select(DataRecord).order_by(DataRecord.id)
+    async def list(self, *, tenant_id: str, user_id: str | None = None) -> List[DataRecord]:
+        stmt = select(DataRecord).where(DataRecord.tenant_id == tenant_id).order_by(DataRecord.id)
+        if user_id:
+            stmt = stmt.where(DataRecord.user_id == user_id)
         result = await self.session.execute(stmt)
         return list(result.scalars().all())
 
-    async def get(self, data_id: int) -> DataRecord | None:
-        stmt = select(DataRecord).where(DataRecord.id == data_id)
+    async def get(self, data_id: int, *, tenant_id: str, user_id: str | None = None) -> DataRecord | None:
+        stmt = select(DataRecord).where(DataRecord.id == data_id, DataRecord.tenant_id == tenant_id)
+        if user_id:
+            stmt = stmt.where(DataRecord.user_id == user_id)
         result = await self.session.execute(stmt)
         return result.scalar_one_or_none()
 
-    async def delete(self, data_id: int) -> bool:
-        stmt = delete(DataRecord).where(DataRecord.id == data_id)
+    async def delete(self, data_id: int, *, tenant_id: str, user_id: str | None = None) -> bool:
+        stmt = delete(DataRecord).where(DataRecord.id == data_id, DataRecord.tenant_id == tenant_id)
+        if user_id:
+            stmt = stmt.where(DataRecord.user_id == user_id)
         result = await self.session.execute(stmt)
         # rows_deleted can be None on some dialects; treat truthy as success
         return bool(result.rowcount)

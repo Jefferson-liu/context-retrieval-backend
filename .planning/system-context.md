@@ -12,5 +12,5 @@
 
 ## Project Constraints & Patterns
 - Keep interfaces/flags that allow toggling between strict per-product scope and tenant-only scope (product as metadata).
-- Favor feature flags for Graphiti adoption to preserve fallback paths.
 - Provenance matters: track source system (e.g., Slack), tenant_id, product_id, user_id with each stored item.
+- Auth placeholder: current implementation accepts a single X-Scope ("tenant:user") header; placeholders can supply defaults. Design dependencies so token-based auth can replace this without changing service/repo interfaces.
