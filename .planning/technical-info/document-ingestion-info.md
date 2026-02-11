@@ -9,6 +9,7 @@ Persist documents and text threads, chunk/contextualize them, generate embedding
   - Uses `DocumentRepository`, `ChunkRepository`, `create_vector_store`, `KnowledgeGraphService`, `DocumentSummaryService`, `ProjectSummaryService`, `GitService`, `CommitMessageService`, `DocumentFileService`.
   - Chunking via `infrastructure/ai/chunking.Chunker` (Markdown-aware, recursive character splitter; chunk_size=512, overlap=20).
   - Embedding via `infrastructure/ai/embedding.Embedder` (BAAI/llm-embedder locally; OpenAI `text-embedding-3-small` when `local=False`).
+- Minimal POC path: `DataService.create_record` / `create_records_bulk` store text + chunks and optional Graphiti episodes (no embeddings/vector store yet).
 - `services/text_thread/text_thread_service.TextThreadService`
   - Accepts Slack-style threads (messages list); stores thread as JSON-lines text, chunks it, and runs knowledge extraction.
 - `KnowledgeGraphService`
@@ -31,6 +32,7 @@ Persist documents and text threads, chunk/contextualize them, generate embedding
    - Overwrite document content, delete old chunks/vectors, reprocess as above, and commit git change.
 3) `delete_document`:
    - Soft knowledge cleanup by calling `refresh_document_knowledge` with empty content, delete vectors/chunks/document, remove file, update project summary, optional git commit.
+- POC bulk upload shortcut: `POST /documents/bulk` accepts multiple files, creates records/chunks for each via `DataService.create_records_bulk`, and bulk-ingests all chunks to Graphiti in one call (scoped by tenant/user group_id). Each file now commits in its own transaction; failures are isolated per file. Response returns successes and errors; status codes: 201 (all success), 207 (partial), 503 (none succeeded but errors reported).
 
 ## Data Flow (Text Thread Ingestion)
 - `TextThreadService.upload_text_thread`:

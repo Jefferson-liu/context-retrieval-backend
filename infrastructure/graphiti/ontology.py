@@ -101,6 +101,11 @@ class Mentions(BaseModel):
     source: str | None = Field(None, description="Source identifier or URL")
 
 
+class HasFeature(BaseModel):
+    status: str | None = Field(None, description="Status/context of the feature relationship")
+    notes: str | None = Field(None, description="Additional context or rationale")
+
+
 DEFAULT_ENTITY_TYPES: Dict[str, Type[BaseModel]] = {
     "Product": Product,
     "Feature": Feature,
@@ -120,6 +125,7 @@ DEFAULT_EDGE_TYPES: Dict[str, Type[BaseModel]] = {
     "Blocks": Blocks,
     "Decides": Decides,
     "Mentions": Mentions,
+    "HasFeature": HasFeature,
 }
 
 DEFAULT_EDGE_TYPE_MAP: Mapping[Tuple[str, str], Sequence[str]] = {
@@ -128,6 +134,7 @@ DEFAULT_EDGE_TYPE_MAP: Mapping[Tuple[str, str], Sequence[str]] = {
     ("Person", "Decision"): ["Decides", "Mentions"],
     ("Team", "Product"): ["Owns", "WorksOn"],
     ("Team", "Feature"): ["WorksOn"],
+    ("Product", "Feature"): ["HasFeature"],
     ("Feature", "Product"): ["Implements", "DependsOn"],
     ("Feature", "Feature"): ["DependsOn", "Blocks"],
     ("Issue", "Feature"): ["Blocks", "DependsOn"],

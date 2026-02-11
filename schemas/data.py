@@ -28,3 +28,14 @@ class DataResponse(BaseModel):
     body: str
     chunk_count: Optional[int] = None
     chunks: Optional[List[ChunkResponse]] = None
+
+
+class BulkIngestError(BaseModel):
+    index: int
+    title: Optional[str] = None
+    error: str
+
+
+class BulkDataResponse(BaseModel):
+    successes: List[DataResponse] = Field(default_factory=list)
+    errors: List[BulkIngestError] = Field(default_factory=list)

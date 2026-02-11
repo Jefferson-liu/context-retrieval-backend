@@ -1,4 +1,11 @@
-from .data import DataCreateRequest, DataResponse, DataListItem, ChunkResponse
+from .data import (
+    DataCreateRequest,
+    DataResponse,
+    DataListItem,
+    ChunkResponse,
+    BulkDataResponse,
+    BulkIngestError,
+)
 from .thread import ThreadCreateRequest, ThreadIngestResponse
 
 __all__ = [
@@ -6,6 +13,8 @@ __all__ = [
     "DataResponse",
     "DataListItem",
     "ChunkResponse",
+    "BulkDataResponse",
+    "BulkIngestError",
     "ThreadCreateRequest",
     "ThreadIngestResponse",
 ]

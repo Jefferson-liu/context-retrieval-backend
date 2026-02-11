@@ -2,8 +2,6 @@ from __future__ import annotations
 
 from contextlib import asynccontextmanager
 
-from contextlib import asynccontextmanager
-
 from fastapi import FastAPI
 
 from infrastructure.database import init_db
@@ -15,7 +13,7 @@ from routers.search_router import router as search_router
 
 
 @asynccontextmanager
-async def lifespan(app: FastAPI):  # noqa: D401 - FastAPI lifespan handler
+async def lifespan(app: FastAPI):
     await init_db()
     await ensure_bootstrap()
     yield

@@ -7,6 +7,7 @@
 Documented system context, project manifest, Graphiti KG POC spec, tenancy/auth scope, document/thread ingestion, vector store, and query/retrieval behaviors to align on scope, latency posture, and future Graphiti pivot.
 
 ## ✅ Recently Completed
+- Added per-file transactional handling for `/documents/bulk` with partial success responses (201/207/503) and structured error reporting.
 - Added system context (tenancy, Graphiti pivot, low-latency expectation, external auth ownership).
 - Added project manifest (vision, audience, scope/out-of-scope).
 - Added technical spec for Graphiti KG POC (scoping, data flow, performance posture).
@@ -31,15 +32,24 @@ Documented system context, project manifest, Graphiti KG POC spec, tenancy/auth 
 - Fixed thread anchor edge creation by setting required Graphiti `created_at` on `EntityEdge`.
 - Thread ingestion responses now surface aggregated Graphiti entities/edges and invalidated edges.
 - Made OpenAI API key configurable via settings and propagate it to Graphiti client for LLM-backed ingestion.
+- Added explicit `HasFeature` edge (Product -> Feature) to ontology to make product-feature relationships first-class.
+- Added Anthropic client factory for provider-agnostic LLM use and a LangChain prompt for feature answers; documented the feature-answer spec.
+- Implemented feature answer service and router (`POST /feature-answers`) that runs scoped Graphiti search, formats context, and calls Anthropic with the structured prompt.
+- Added bulk document upload (`POST /documents/bulk`) and DataService batch ingestion to create records/chunks and bulk-send episodes to Graphiti.
+- Reviewed the current codebase state and summarized key components, endpoints, and open gaps for catch-up (no code changes).
+- Reviewed the current `feature-answers` implementation and identified response-model and context-building mismatches to fix before release.
+- Removed the `feature-answers` vertical end-to-end (router/service/schema/prompt/Anthropic client), unwired it from `main.py`, and removed now-unused Anthropic dependencies.
 
 ## 🚧 Current Hurdles / WIP
 - Need details from external auth service: exact fields for tenant/product/user/roles and delivery mechanism (headers/token claims).
 - Need confirmation on additional context sources beyond Slack threads (files, other systems).
 - Need concrete latency/SLO targets and any future compliance/retention requirements once provided.
 - Need to add ingest/query endpoints on the new minimal stack and wire Graphiti usage by default (no flag).
+- Add test coverage and client guidance for partial success responses on `/documents/bulk`.
 
 ## ⏭️ IMMEDIATE NEXT STEPS
 1. Capture auth payload contract (fields, source, headers vs tokens) and update system-context + technical spec.
 2. List and prioritize additional context sources (if any) and update manifest/spec accordingly.
 3. Record target latency/SLO numbers and any compliance/retention rules when available.
 4. Add endpoints to create/list/delete data records and their chunks using the new repositories; integrate Graphiti ingestion by default (no feature flag).
+5. Add API/docs/tests for `/documents/bulk` partial success behavior and error payloads.

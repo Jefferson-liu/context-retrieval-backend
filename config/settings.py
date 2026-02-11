@@ -27,7 +27,10 @@ class Settings:
         self.NEO4J_URI = os.getenv("NEO4J_URI")
         self.NEO4J_USER = os.getenv("NEO4J_USER")
         self.NEO4J_PASSWORD = os.getenv("NEO4J_PASSWORD")
-        self.OPENAI_API_KEY = os.getenv("PRODUCT_OS_OPENAI_KEY")
+        self.OPENAI_API_KEY = os.getenv("PERSONAL_OPENAI_KEY")
+        self.ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
+        self.GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+        self.MODEL = os.getenv("MODEL", "openai").lower()
         self.APP_ENV = os.getenv("APP_ENV", "dev").lower()
         self.USE_PLACEHOLDER_SCOPE = (
             os.getenv("USE_PLACEHOLDER_SCOPE", "1" if self.APP_ENV in {"dev", "development"} else "0")
@@ -37,6 +40,7 @@ class Settings:
         # Defaults are underscore/dash safe for Graphiti group_ids.
         self.DEFAULT_TENANT_ID = os.getenv("DEFAULT_TENANT_ID", "demo_tenant")
         self.DEFAULT_USER_ID = os.getenv("DEFAULT_USER_ID", "demo_user")
+        self.SEMAPHORE_LIMIT = int(os.getenv("SEMAPHORE_LIMIT", "10"))
 
 
 @lru_cache(maxsize=1)

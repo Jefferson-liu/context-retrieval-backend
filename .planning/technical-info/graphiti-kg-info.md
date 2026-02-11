@@ -22,6 +22,7 @@ Use Graphiti (Neo4j-backed) as the knowledge graph for ingesting, storing, and r
 ## Data Model & Scoping
 - Namespace via `group_id`: combine tenant_id and product_id (e.g., `tenant:product`), with option to operate tenant-only if product-as-metadata mode is required.
 - Store provenance: source system (Slack), reference time, and user_id for auditing/traceability (roles remain placeholders).
+- Ontology: includes explicit `HasFeature` edge from `Product -> Feature` to model product feature membership (alongside existing `Feature -> Product` `Implements` links).
 
 ## Performance Targets (qualitative)
 - Chatbot-grade latency: avoid blocking LLM calls on query paths; prefer precomputed embeddings and Graphiti hybrid search.

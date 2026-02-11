@@ -32,7 +32,7 @@ def chunk_content(
     return [d.page_content.strip() for d in docs if d.page_content.strip()]
 
 
-def chunk_document(content: str, *, chunk_size: int = 500, chunk_overlap: int = 50) -> List[str]:
+def chunk_document(content: str, *, chunk_size: int = 2000, chunk_overlap: int = 50) -> List[str]:
     """Chunk a generic document/string."""
     return chunk_content(content, chunk_size=chunk_size, chunk_overlap=chunk_overlap)
 
