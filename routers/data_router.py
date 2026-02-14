@@ -60,7 +60,14 @@ async def delete_data(
         user_id=scope["user_id"],
         graphiti_client=graphiti_client,
     )
-    deleted = await service.delete_record(data_id)
+    try:
+        deleted = await service.delete_record(data_id)
+    except Exception as exc:
+        await session.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=f"Graphiti deletion failed: {exc}",
+        )
     if not deleted:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
     await session.commit()

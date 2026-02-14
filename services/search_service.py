@@ -13,7 +13,17 @@ class SearchService:
         self.group_ids = group_ids
 
     async def search(self, query: str) -> Any:
-        return await self.graphiti.search(
+        results = await self.graphiti.search(
             query=query,
             group_ids=self.group_ids,
         )
+        payload = []
+        for item in results:
+            payload.append(
+                {
+                    "fact": item.fact,
+                    "valid_at": item.valid_at,
+                    "invalid_at": item.invalid_at,
+                }
+            )
+        return results

@@ -11,7 +11,7 @@ from graphiti_core import Graphiti
 from graphiti_core.edges import EntityEdge
 from graphiti_core.nodes import EntityNode, EpisodeType
 
-from infrastructure.repositories import DataRepository, ChunkRepository
+from infrastructure.repositories import DataRepository, ChunkRepository, GraphitiEpisodeRepository
 from services.chunking import chunk_thread
 from infrastructure.graphiti import (
     DEFAULT_ENTITY_TYPES,
@@ -40,6 +40,7 @@ class ThreadService:
         self.user_id = user_id
         self.data_repo = DataRepository(session)
         self.chunk_repo = ChunkRepository(session)
+        self.graphiti_episode_repo = GraphitiEpisodeRepository(session)
         self.graphiti_client = graphiti_client
 
     async def ingest_thread(self, *, messages: List[Dict[str, Any]]) -> dict:
@@ -73,6 +74,7 @@ class ThreadService:
             try:
                 thread_key = _build_thread_key(canonical_thread_ts, channel)
                 group_id = build_group_id(self.tenant_id, self.user_id)
+                episode_uuids: list[str] = []
                 for idx, chunk in enumerate(chunks):
                     chunk_ref = _parse_slack_ts(chunk.get("first_ts")) or earliest_ts or datetime.now(timezone.utc)
                     chunk_payload = {
@@ -97,6 +99,7 @@ class ThreadService:
                         graph_edges[edge.uuid] = edge
                         if edge.invalid_at or edge.expired_at:
                             invalidated_edges[edge.uuid] = edge
+                    episode_uuids.append(result.episode.uuid)
                     await _attach_thread_context(
                         client=self.graphiti_client,
                         thread_key=thread_key,
@@ -107,6 +110,10 @@ class ThreadService:
                         entities=result.nodes,
                         episode_uuid=result.episode.uuid,
                     )
+                await self.graphiti_episode_repo.create_batch(
+                    data_id=record.id,
+                    episode_uuids=episode_uuids,
+                )
             except Exception as exc:
                 logger.warning("Graphiti ingestion failed for thread-%s: %s", record.id, exc)
                 raise

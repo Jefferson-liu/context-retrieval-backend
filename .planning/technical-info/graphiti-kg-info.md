@@ -34,3 +34,7 @@ Use Graphiti (Neo4j-backed) as the knowledge graph for ingesting, storing, and r
 
 ## Maintenance / Troubleshooting
 - Use `python -m scripts.reset_storage` (with `--force` to skip confirmation) to drop/recreate the Postgres tables **and** invoke `graphiti_core.utils.maintenance.graph_data_operations.clear_data` followed by `Graphiti.build_indices_and_constraints()`. This wipes all tenants' KG data, so only run in local/testing environments.
+
+## Known Gaps
+- Targeted graph cleanup now exists for `/data/{id}` by persisting per-record episode UUID mappings and deleting them through `Graphiti.remove_episode(...)` before SQL delete.
+- Remaining gap: existing historical records created before mapping persistence may still have orphaned episodes and require scoped/full reset cleanup.

@@ -2,11 +2,13 @@ from __future__ import annotations
 
 from datetime import datetime
 import logging
-from typing import List
+from typing import Any, List
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from infrastructure.repositories import DataRepository, ChunkRepository
+from graphiti_core.errors import NodeNotFoundError
+
+from infrastructure.repositories import DataRepository, ChunkRepository, GraphitiEpisodeRepository
 from services.chunking import chunk_document
 from graphiti_core import Graphiti
 from graphiti_core.nodes import EpisodeType
@@ -37,10 +39,13 @@ class DataService:
         self.user_id = user_id
         self.data_repo = DataRepository(session)
         self.chunk_repo = ChunkRepository(session)
+        self.graphiti_episode_repo = GraphitiEpisodeRepository(session)
         self.graphiti_client = graphiti_client
 
-    async def create_record(self, *, title: str, body: str) -> dict:
-        chunks = chunk_document(body)
+    async def create_record(self, *, title: str, body: str, chunking: bool = True) -> dict:
+        chunks = chunk_document(body, chunk_size=1000) if chunking else [body]
+        if not chunks:
+            chunks = [body]
         record = await self.data_repo.create_with_chunks(
             tenant_id=self.tenant_id,
             user_id=self.user_id,
@@ -63,11 +68,39 @@ class DataService:
                 for i, chunk in enumerate(chunks)
             ]
             try:
-                await self.graphiti_client.add_episode_bulk(episodes, group_id=build_group_id(self.tenant_id, self.user_id))
+                results = await self.graphiti_client.add_episode_bulk(
+                    episodes,
+                    group_id=build_group_id(self.tenant_id, self.user_id),
+                )
+                await self.graphiti_episode_repo.create_batch(
+                    data_id=record.id,
+                    episode_uuids=[episode.uuid for episode in results.episodes],
+                )
             except Exception as exc:
                 logger.warning("Graphiti bulk ingestion failed for data-%s: %s", record.id, exc)
                 raise
         return {"id": record.id, "title": record.title, "body": record.body, "chunk_count": len(chunks)}
+
+    async def create_records_bulk(
+        self,
+        files: list[tuple[str, str]],
+        *,
+        chunking: bool = True,
+    ) -> dict[str, list[dict[str, Any]]]:
+        """Ingest many records with per-file transaction boundaries."""
+        successes: list[dict[str, Any]] = []
+        errors: list[dict[str, Any]] = []
+
+        for idx, (title, body) in enumerate(files):
+            try:
+                record = await self.create_record(title=title, body=body, chunking=chunking)
+                await self.session.commit()
+                successes.append(record)
+            except Exception as exc:
+                await self.session.rollback()
+                errors.append({"index": idx, "title": title, "error": str(exc)})
+
+        return {"successes": successes, "errors": errors}
 
     async def list_records(self) -> List[dict]:
         records = await self.data_repo.list(tenant_id=self.tenant_id, user_id=self.user_id)
@@ -86,4 +119,28 @@ class DataService:
         }
 
     async def delete_record(self, data_id: int) -> bool:
+        record = await self.data_repo.get(data_id, tenant_id=self.tenant_id, user_id=self.user_id)
+        if record is None:
+            return False
+
+        if self.graphiti_client:
+            episode_uuids = await self.graphiti_episode_repo.list_episode_uuids_for_data(
+                data_id,
+                tenant_id=self.tenant_id,
+                user_id=self.user_id,
+            )
+            for episode_uuid in episode_uuids:
+                try:
+                    await self.graphiti_client.remove_episode(episode_uuid)
+                except NodeNotFoundError:
+                    logger.info("Graphiti episode already absent for data-%s: %s", data_id, episode_uuid)
+                except Exception as exc:
+                    logger.warning(
+                        "Graphiti episode deletion failed for data-%s episode-%s: %s",
+                        data_id,
+                        episode_uuid,
+                        exc,
+                    )
+                    raise
+
         return await self.data_repo.delete(data_id, tenant_id=self.tenant_id, user_id=self.user_id)

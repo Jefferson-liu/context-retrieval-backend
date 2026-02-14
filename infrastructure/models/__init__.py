@@ -1,3 +1,3 @@
-from .data import DataRecord, ChunkRecord
+from .data import DataRecord, ChunkRecord, GraphitiEpisodeRecord
 
-__all__ = ["DataRecord", "ChunkRecord"]
+__all__ = ["DataRecord", "ChunkRecord", "GraphitiEpisodeRecord"]

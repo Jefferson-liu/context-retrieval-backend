@@ -29,6 +29,12 @@ class DataRecord(Base):
         cascade="all, delete-orphan",
         passive_deletes=True,
     )
+    graphiti_episodes: Mapped[List["GraphitiEpisodeRecord"]] = relationship(
+        "GraphitiEpisodeRecord",
+        back_populates="data",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+    )
 
     __table_args__ = (
         Index("ix_data_records_tenant_user", "tenant_id", "user_id"),
@@ -51,3 +57,23 @@ class ChunkRecord(Base):
     content: Mapped[str] = mapped_column(Text, nullable=False)
 
     data: Mapped[DataRecord] = relationship("DataRecord", back_populates="chunks")
+
+
+class GraphitiEpisodeRecord(Base):
+    """Graphiti episode UUIDs associated with a stored data record."""
+
+    __tablename__ = "graphiti_episodes"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    data_id: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey("data_records.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    episode_uuid: Mapped[str] = mapped_column(String(64), nullable=False, unique=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+    data: Mapped[DataRecord] = relationship("DataRecord", back_populates="graphiti_episodes")
