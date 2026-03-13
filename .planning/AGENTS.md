@@ -17,6 +17,7 @@ You will use the `.planning/` directory to maintain a persistent state of the pr
 **Location:** Root of `.planning/` folder.
 - **When to read:** IMMEDIATELY upon starting a session to see what was left unfinished.
 - **When to write:** At the end of every response or before you stop generating code.
+- **Required section:** Always keep a `## 🧹 Tech Debt Snapshot (Janitor Queue)` section so cleanup work is visible and actionable.
 
 ### 2. 🟡 `system-context.md` (MANDATORY CONTEXT)
 **Purpose:** Global architectural decisions, design patterns, and "The Rules of the System."
@@ -87,7 +88,9 @@ Before you finish your output, you must determine if the task is **COMPLETE** or
     1. What was just finished.
     2. What broke (if anything).
     3. The exact next line of code or logic that needs to be written.
+    4. A refreshed `## 🧹 Tech Debt Snapshot (Janitor Queue)` section listing newly introduced debt, debt paid down, and deferred cleanup.
 * **If COMPLETE:** Clear the specific task details in `active-state.md` and set status to `IDLE`.
+* **For both states:** Do not remove the tech-debt snapshot section; keep it current so the Codebase Janitor agent can maintain it.
 
 ---
 
@@ -107,6 +110,7 @@ Before you finish your output, you must determine if the task is **COMPLETE** or
 ### Phase 3: Documentation (End of Task)
 * **Update Info:** If you changed how data flows or added a new component, update `{feature}-info.md`.
 * **Log Debt:** If you wrote code that is "messy" or "temporary," you represent a liability to the codebase. You MUST log this in `{feature}-debt.md`.
+* **Update Active Debt Snapshot:** Mirror important debt deltas in `active-state.md` under `## 🧹 Tech Debt Snapshot (Janitor Queue)` and reference the canonical `{feature}-debt.md` file.
 * **Update README:** If the project README needs to reflect new changes, update it now.
 
 ---
@@ -130,6 +134,12 @@ Before you finish your output, you must determine if the task is **COMPLETE** or
 ## 🚧 Current Hurdles / WIP
 - The database migration for the `tokens` table has not been run yet.
 - Need to decide on the expiration time for refresh tokens.
+
+## 🧹 Tech Debt Snapshot (Janitor Queue)
+- New debt: None.
+- Debt paid down this session: None.
+- Deferred cleanup / blockers: None.
+- Canonical debt file: `.planning/technical-info/{feature}-debt.md`
 
 ## ⏭️ IMMEDIATE NEXT STEPS
 1. Run the migration.

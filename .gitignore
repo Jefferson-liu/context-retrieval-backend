@@ -1,7 +1,66 @@
+# Secrets and local environment
 .env
-.env.docker
+.env.*
+!.env.example
+
+# Python bytecode and caches
 __pycache__/
-*.pyc
+*.py[cod]
+*.pyo
+*.pyd
+
+# Virtual environments
 .venv/
 .venv-wsl/
+venv/
+env/
+
+# Test and type-checker caches
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.pyre/
+.hypothesis/
+.tox/
+.nox/
+
+# Coverage artifacts
+.coverage
+.coverage.*
+htmlcov/
+
+# Build and packaging outputs
+build/
+dist/
+*.egg-info/
+.eggs/
+pip-wheel-metadata/
+
+# Local data and notebook artifacts
+*.db
+*.sqlite
+*.sqlite3
+.ipynb_checkpoints/
+
+# IDE/editor and OS noise
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# Logs and local run artifacts
+*.log
+*.err
+*.out
+*.pid
+*.tmp
+*.temp
+tmp/
+temp/
+tmp_*.py
+
+# Project-local scratch directories/files
 trackrec context/

@@ -1,24 +1,216 @@
 # 🚦 Current Session State
 
-**Status:** IDLE  
-**Current Feature:** Graphiti episode mapping + scoped delete cleanup
+**Status:** IN_PROGRESS
+**Current Feature:** Spec-Driven Change Scoping Planning
+**Janitor Contract:** Keep `## 🧹 Tech Debt Snapshot (Janitor Queue)` present and current in every handoff.
 
 ## ⏳ Context
-Implemented per-record Graphiti episode UUID persistence so relational deletes can remove associated Neo4j episodes.
+Repository context system foundations are in place. Current focus is planning-first: define a repeatable spec-to-scope workflow so product specs can be turned into bounded engineering plans before code changes begin.
 
 ## ✅ Recently Completed
-- Added `graphiti_episodes` SQL model linked to `data_records` with cascade delete.
-- Added `GraphitiEpisodeRepository` for storing and retrieving scoped episode UUID mappings.
-- Updated `DataService.create_record` to persist UUIDs returned by `add_episode_bulk`.
-- Updated `ThreadService.ingest_thread` to persist UUIDs returned by per-chunk `add_episode`.
-- Updated `DataService.delete_record` to remove mapped Graphiti episodes with `Graphiti.remove_episode(...)` before SQL delete.
-- Updated `/data/{id}` router delete error handling to return `503` on graph deletion failures.
-- Updated planning docs for the new deletion flow and logged remaining backfill/testing debt.
-- Restored `DataService.create_record(..., chunking=...)` and `create_records_bulk(...)` compatibility required by `/documents` and `/documents/bulk` routers.
+- Added planning artifacts for product-spec driven scoping:
+  - `.planning/nontechnical-info/spec-driven-change-scoping-context.md`
+  - `.planning/technical-info/spec-driven-change-scoping-info.md`
+  - `.planning/technical-info/spec-driven-change-scoping-debt.md`
+- Replaced path/affinity grouping with an adaptive dependency-aware Repo Manager in `services/repo_knowledge/grouping/repo_manager.py`.
+- Renamed the canonical public surface from `group_summary` to `repo_manager` / `architecture` while keeping the legacy storage layer stable:
+  - new router: `routers/repo_knowledge_repo_manager_router.py`
+  - new schemas: `schemas/repo_knowledge_repo_manager.py`
+  - new service/runner wrappers:
+    - `services/repo_knowledge/repo_manager_service.py`
+    - `services/repo_knowledge/repo_manager_background_runner.py`
+  - canonical infrastructure aliases now exist for models/repositories/config so downstream code can import `repo_manager` names without touching the legacy table layer.
+  - `main.py` now starts the Repo Manager runner and mounts the repo-manager router.
+  - pipeline responses now expose `repo_manager_run_id` / `repo_manager_run_status` and accept `force_rerepo_manager`.
+  - MCP tools now use `repo_manager` terminology for segment read/list operations.
+- Extended the architecture segment output to include Mermaid and added repo-level merge prompts plus merger runtime:
+  - `services/repo_knowledge/prompts/group_summary_system.md`
+  - `services/repo_knowledge/prompts/group_summary_user.md`
+  - `services/repo_knowledge/prompts/architecture_merge_system.md`
+  - `services/repo_knowledge/prompts/architecture_merge_user.md`
+  - `services/repo_knowledge/group_summarization/architecture_merger.py`
+- Persisted merged repo-level architecture artifacts on the run record and per-segment Mermaid diagrams on segment summaries.
+- Added traceable LLM failure handling for segment generation and architecture merge:
+  - `services/repo_knowledge/group_summarization/errors.py`
+  - structured diagnostics now persist stage, diagnostic code, error type, and raw model text when available.
+- Added canonical repo-manager/architecture endpoints:
+  - `POST /repo-knowledge/repo-manager-runs`
+  - `GET /repo-knowledge/repo-manager-runs/{repo_manager_run_id}`
+  - `GET /repo-knowledge/repo-manager-runs/{repo_manager_run_id}/segments`
+  - `GET /repo-knowledge/repo-manager-runs/{repo_manager_run_id}/architecture`
+  - `GET /repo-knowledge/runs/{run_id}/repo-manager/latest`
+- Updated pipeline stage reporting from `grouping/group_summary` to `repo_manager/architecture`.
+- Validation run: `pytest -q tests/repo_knowledge` -> `88 passed`
+- Added `handle_tool_error=True` to all agent tool definitions so tool exceptions are returned to the LLM as error messages instead of crashing the file summarization:
+  - `file_summarizer.py`: `return_directory`, `return_file_code`, `return_reference_graph` (3 tools)
+  - `repo_full_summarizer.py`: `return_directory`, `return_file_code`, `return_reference_graph`, `return_file_summary` (4 tools)
+  - validation: `86 passed` in `tests/repo_knowledge`
+- Generated failure diagnostic for latest file-summary run `5d1a9b44-3804-4e27-9635-cde36048c636`:
+  - run status `completed` with partial failures (`files_seen=282`, `files_summarized=248`, `files_failed=34`).
+  - 3 distinct failure classes: `return_directory` bad path (11), JSON parse failure (10), `return_file_code` file-not-found (13).
+  - All 34 parent directories exist on disk — failures are agent-side (bad tool arguments, hallucinated file paths, non-JSON output).
+- Implemented full file-summary usage tracking and cost-reporting feature:
+  - Created diagnostic script `scripts/file_summary_diag_report.py` for failure triage (Phase 1).
+  - Added `RepoFileSummaryUsageRecord` ORM model (`infrastructure/models/repo_knowledge.py`):
+    - New table `repo_file_summary_usage` with aggregate token columns + detailed `steps` JSON.
+    - Indexed on `file_summary_run_id` and `subject_id`.
+  - Created `infrastructure/repositories/repo_file_summary_usage_repository.py`:
+    - `create()`, `list_for_run()` (paginated, joins subject, ordered by total_tokens DESC), `aggregate_for_run()`.
+  - Added `extract_full_trace_from_state()` function to `services/repo_knowledge/summarization/react_agent_runtime.py`:
+    - Iterates LangGraph state messages, extracts per-step token usage from AIMessage.usage_metadata.
+    - Captures tool calls, reasoning content, finish_reason, model_name per step.
+    - Returns aggregate totals + ordered `steps` list.
+  - Modified `services/repo_knowledge/summarization/file_summarizer.py`:
+    - Added `usage_trace` field to `SummaryResult` dataclass.
+    - `_invoke_agent()` now captures timing via `time.perf_counter()` and calls `extract_full_trace_from_state()`.
+  - Modified `services/repo_knowledge/file_summary_service.py`:
+    - Worker persists usage records: `status=completed` (with trace), `status=skipped` (deterministic_empty), `status=failed` (with error).
+    - Added `list_usage()` and `aggregate_usage()` service methods for read access.
+  - Added Pydantic response schemas in `schemas/repo_knowledge_file_summary.py`:
+    - `RepoFileSummaryUsageItem`, `RepoFileSummaryUsageListResponse`, `RepoFileSummaryUsageSummaryResponse`.
+  - Added two new API endpoints to `routers/repo_knowledge_file_summary_router.py`:
+    - `GET /repo-knowledge/file-summary-runs/{id}/usage` — paginated per-file usage with filters (status, subject_path_prefix).
+    - `GET /repo-knowledge/file-summary-runs/{id}/usage/summary` — aggregated token totals, counts by status, avg_duration_ms, avg_tokens_per_file.
+- Performed reference-based deletion pass for ambiguous root files:
+  - deleted: `temp.txt`, `tmp_gemini_react_smoke.py`, `win_dep_check.txt`
+  - retained: `tmp_file_summary_diag_report.py` (referenced in `.github/prompts/plan-fileSummaryDiagnosticsAndCostReporting.prompt.md`)
+- Verified no remaining `*.err` / `*.out` artifacts after initial janitor cleanup pass.
+- Removed project-local generated Python caches (`__pycache__/`, `*.pyc`) outside virtual environments.
+- Removed additional low-risk local cache/build outputs outside virtual environments (`.pytest_cache`, `.coverage*`, `htmlcov`, and similar standard tool outputs).
+- Ran first janitor cleanup pass for low-risk artifacts and removed repository `*.err`/`*.out` files.
+- Verified root-only ignore policy remains in effect and root `.gitignore` already covers `*.err` and `*.out`.
+- Refined `Codebase Janitor` custom agent deletion policy:
+  - allow auto-delete for high-confidence low-risk junk artifacts (e.g., `*.err`, `*.out`)
+  - require confirmation with explicit reasons when confidence is not high
+- Created workspace custom agent: `.github/agents/codebase-janitor.agent.md`.
+  - scope: tech-debt/junk cleanup, stale test pruning, `.gitignore` hygiene, and `.planning` update workflow.
+  - planning docs added:
+    - `.planning/technical-info/agent-customization-info.md`
+    - `.planning/technical-info/agent-customization-debt.md`
+- Added file-summary diagnostics retrieval surface for failure triage:
+  - endpoint: `GET /repo-knowledge/file-summary-runs/{file_summary_run_id}/diagnostics`
+  - service/repository wiring for scoped pagination + filters (`severity`, `subject_path_prefix`)
+  - added unit tests: `tests/repo_knowledge/test_file_summary_service_diagnostics.py`
+  - validation run: `pytest -q tests/repo_knowledge` -> `86 passed`
+- Expanded root `.gitignore` to ignore non-source local artifacts (venvs, caches, IDE files, logs, temp outputs, local DB files).
+- Re-aligned file and repo summarizers to native LangGraph ReAct execution:
+  - removed text-protocol tool loop paths in:
+    - `services/repo_knowledge/summarization/file_summarizer.py`
+    - `services/repo_knowledge/repo_full_summarization/repo_full_summarizer.py`
+  - shared runtime now uses:
+    - `create_react_agent(model.bind_tools(tools), tools)` in `services/repo_knowledge/summarization/react_agent_runtime.py`
+  - file/repo summarizer tools now return structured dict payloads (no JSON string wrappers).
+- Added explicit protocol-failure diagnostics (fail loud, no fallback):
+  - `summary_file_summary_agent_protocol_failed`
+  - `repo_full_summary_agent_protocol_failed`
+  - diagnostic code persisted as `thought_signature_missing` when applicable.
+- Upgraded/pinned LangChain/LangGraph/Gemini stack in `requirements.txt` and added:
+  - `requirements-repo-knowledge-agent-constraints.txt`
+- Added/updated tests for new ReAct flow and diagnostics:
+  - `tests/repo_knowledge/test_file_summarizer.py`
+  - `tests/repo_knowledge/test_repo_full_summarizer.py`
+  - `tests/repo_knowledge/test_summary_failure_classification.py`
+- Validation run:
+  - `pytest -q tests/repo_knowledge`
+  - result: `84 passed`
+- Hard-cut API/domain rename from extraction naming to file-summary naming:
+  - routes now use `/repo-knowledge/file-summary-runs...`
+  - latest-file endpoint is `/repo-knowledge/runs/{run_id}/file-summaries/latest`
+  - pipeline/request force flag uses `force_refile_summary`
+- Added startup idempotent DB migrator (pre-`create_all`) in `infrastructure/database.py`:
+  - legacy table renames:
+    - `repo_extraction_runs` -> `repo_file_summary_runs`
+    - `repo_summaries` -> `repo_file_summaries`
+    - `repo_summary_diagnostics` -> `repo_file_summary_diagnostics`
+  - legacy column renames:
+    - `extraction_run_id` -> `file_summary_run_id`
+    - `source_extraction_run_id` -> `source_file_summary_run_id` (dependent tables)
+  - legacy safety-copy path when old/new tables both exist.
+- Added repo full-summary domain + stage:
+  - new tables already modeled and now wired:
+    - `repo_full_summary_runs`
+    - `repo_full_summaries`
+    - `repo_full_summary_diagnostics`
+  - new repositories:
+    - `repo_full_summary_run_repository.py`
+    - `repo_full_summary_repository.py`
+    - `repo_full_summary_diagnostic_repository.py`
+  - new LangGraph README agent runtime with tools:
+    - reused: `return_directory`, `return_file_code`, `return_reference_graph`
+    - added: `return_file_summary(file_name)`
+  - new prompt files:
+    - `services/repo_knowledge/prompts/repo_full_summary_system.md`
+    - `services/repo_knowledge/prompts/repo_full_summary_user.md`
+  - new service + worker + background runner:
+    - `services/repo_knowledge/repo_full_summary_service.py`
+    - `services/repo_knowledge/repo_full_summary_background_runner.py`
+  - new router/endpoints:
+    - `POST /repo-knowledge/repo-full-summary-runs`
+    - `GET /repo-knowledge/repo-full-summary-runs/{repo_full_summary_run_id}`
+    - `GET /repo-knowledge/repo-full-summary-runs/{repo_full_summary_run_id}/readme`
+    - `GET /repo-knowledge/runs/{run_id}/repo-full-summary/latest`
+- Pipeline stage order updated:
+  - ingestion -> file_summary -> repo_full_summary -> embedding -> grouping/group_summary
+  - new pipeline fields added:
+    - `force_rerepo_summary`
+    - `repo_full_summary_run_id`
+    - `repo_full_summary_run_status`
+- App lifecycle wiring updated in `main.py`:
+  - starts/stops file-summary runner and repo-full-summary runner
+  - includes new routers.
+- Configuration extended:
+  - `REPO_FULL_SUMMARY_MAX_CONCURRENT_RUNS`
+  - `REPO_FULL_SUMMARY_PROMPT_VERSION`
+  - `REPO_FULL_SUMMARY_TIMEOUT_SECONDS`
+  - `REPO_FULL_SUMMARY_RETRY_COUNT`
+  - `REPO_FULL_SUMMARY_MAX_INPUT_CHARS`
+  - `REPO_FULL_SUMMARY_MAX_ITERATIONS`
+- Added/updated tests:
+  - `tests/repo_knowledge/test_repo_full_summarizer.py`
+  - `tests/repo_knowledge/test_startup_migration.py`
+  - updated:
+    - `tests/repo_knowledge/test_prompt_loader.py`
+    - `tests/repo_knowledge/test_pipeline_status_resolution.py`
+    - `tests/repo_knowledge/test_run_selector_requests.py`
+- Validation run:
+  - `pytest -q tests/repo_knowledge`
+  - result: `76 passed`
+- Switched unavailable Gemini model code to the exact available code:
+  - `gemini-3-flash` -> `gemini-3-flash-preview`
+  - updated in:
+    - `services/repo_knowledge/file_summary_service.py`
+    - `services/repo_knowledge/repo_full_summary_service.py`
+    - `services/repo_knowledge/summarization/model_factory.py`
+  - validation run:
+    - `pytest -q tests/repo_knowledge`
+    - result: `76 passed`
+- Replaced failing Gemini function-calling loops for file/repo summarizers with a bounded text-driven LangChain tool loop:
+  - updated:
+    - `services/repo_knowledge/summarization/file_summarizer.py`
+    - `services/repo_knowledge/repo_full_summarization/repo_full_summarizer.py`
+  - root cause documented: Gemini + current LangChain integration drops required thought-signature fields across tool turns.
+  - added regression tests:
+    - `tests/repo_knowledge/test_file_summarizer.py`
+    - `tests/repo_knowledge/test_repo_full_summarizer.py`
+  - validation run:
+    - `pytest -q tests/repo_knowledge/test_file_summarizer.py tests/repo_knowledge/test_file_summarizer_tools.py tests/repo_knowledge/test_repo_full_summarizer.py`
+    - result: `21 passed`
 
 ## 🚧 Current Hurdles / WIP
-- Historical records created before mapping persistence still need explicit cleanup/backfill if targeted deletes are required.
+- Repo full-summary still sends empty `entry_points_trace` and `related_repo_info`, so the new architecture stage is not yet receiving the paper's full Algorithm 1 context.
+- Startup migration adds new architecture columns idempotently, but there is still no formal Alembic migration.
+- Spec-to-scope planning outputs are documented, but no single canonical scoped-plan template has been selected for team execution.
+
+## 🧹 Tech Debt Snapshot (Janitor Queue)
+- New debt: Planning workflow for spec-driven scoping exists but lacks a canonical scoped-plan template and confidence rubric.
+- Debt paid down this session: Defined nontechnical and technical planning baselines for spec-driven change scoping.
+- Deferred cleanup / blockers: Add scoped-plan template, confidence rubric, and post-implementation feedback loop; complete `entry_points_trace` / `related_repo_info`; decide timeline for storage-layer rename migration.
+- Canonical debt files:
+  - `.planning/technical-info/spec-driven-change-scoping-debt.md`
+  - `.planning/technical-info/repo-knowledge-ingestion-debt.md`
 
 ## ⏭️ IMMEDIATE NEXT STEPS
-1. Add integration tests for create/delete parity across SQL and Graphiti.
-2. Decide whether to backfill historical episode mappings or run reset in non-production environments.
+1. Choose one canonical scoped-plan template format (markdown sections + required evidence fields).
+2. Pilot the new planning workflow on one real product spec and collect gaps.
+3. Define a confidence rubric for scope boundaries and unknowns.
+4. Continue backlog cleanup: wire real `entry_points_trace` / `related_repo_info` extraction and add migration planning for legacy storage naming.
