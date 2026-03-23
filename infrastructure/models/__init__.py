@@ -23,6 +23,13 @@ from .repo_knowledge import (
     RepoManagerDiagnosticRecord,
 )
 
+# Legacy aliases kept for backwards-compatibility with group_summary_service layer
+RepoGroupSummaryRunRecord = RepoManagerRunRecord
+RepoGroupSummaryRecord = RepoManagerSegmentSummaryRecord
+RepoGroupSummaryDiagnosticRecord = RepoManagerDiagnosticRecord
+RepoSummaryGroupRecord = RepoManagerSegmentRecord
+RepoSummaryGroupMemberRecord = RepoManagerSegmentMemberRecord
+
 __all__ = [
     "DataRecord",
     "ChunkRecord",

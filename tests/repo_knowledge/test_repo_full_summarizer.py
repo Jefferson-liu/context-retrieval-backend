@@ -160,8 +160,6 @@ def test_repo_full_summarizer_parses_marker_wrapped_output(monkeypatch: pytest.M
                 repo_path="/tmp/repo",
                 repo_address="repo-address",
                 tech_stack="python",
-                entry_points_trace="",
-                related_repo_info="",
             )
         )
     )
@@ -197,8 +195,6 @@ def test_repo_full_summarizer_malformed_output_raises(monkeypatch: pytest.Monkey
                     repo_path="/tmp/repo",
                     repo_address="repo-address",
                     tech_stack="python",
-                    entry_points_trace="",
-                    related_repo_info="",
                 )
             )
         )
@@ -237,8 +233,6 @@ def test_repo_full_summarizer_react_executes_tool(monkeypatch: pytest.MonkeyPatc
                 repo_path="/tmp/repo",
                 repo_address="repo-address",
                 tech_stack="python",
-                entry_points_trace="",
-                related_repo_info="",
             )
         )
     )
@@ -275,8 +269,6 @@ def test_repo_full_summarizer_protocol_error_bubbles(monkeypatch: pytest.MonkeyP
                     repo_path="/tmp/repo",
                     repo_address="repo-address",
                     tech_stack="python",
-                    entry_points_trace="",
-                    related_repo_info="",
                 )
             )
         )

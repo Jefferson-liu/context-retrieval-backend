@@ -14,6 +14,9 @@ from services.repo_knowledge.prompt_loader import load_prompt, render_prompt
 from services.repo_knowledge.summarization.file_summarizer import (
     FileSummaryAgentTools,
     SummaryInput,
+    _format_directory_result,
+    _format_file_code_result,
+    _format_reference_graph_result,
 )
 from services.repo_knowledge.summarization.react_agent_runtime import (
     invoke_react_agent,
@@ -122,8 +125,7 @@ class RepoFullSummaryAgentTools:
                 coroutine=self._return_directory_tool,
                 name="return_directory",
                 description=(
-                    "Return repository directory entries under repo_path with bounded depth and pagination. "
-                    "Use when project structure is needed."
+                    "Retrieve the project directory structure for a given path with bounded depth and pagination."
                 ),
                 args_schema=ReturnDirectoryArgs,
                 handle_tool_error=True,
@@ -132,8 +134,9 @@ class RepoFullSummaryAgentTools:
                 coroutine=self._return_file_code_tool,
                 name="return_file_code",
                 description=(
-                    "Read source code for one repository file with line-based paging. "
-                    "Use when code-level details are needed."
+                    "Read the content of a code file. The use_path should be a relative path "
+                    "with the correct file extension (e.g. .py for Python, .c/.h for C). "
+                    "Supports line-based paging via start_line and max_lines."
                 ),
                 args_schema=ReturnFileCodeArgs,
                 handle_tool_error=True,
@@ -142,8 +145,8 @@ class RepoFullSummaryAgentTools:
                 coroutine=self._return_reference_graph_tool,
                 name="return_reference_graph",
                 description=(
-                    "Return incoming/outgoing reference edges for a file/class/function subject "
-                    "from the ingested repository graph."
+                    "Retrieve the reference and reverse-reference graph for a file, class, or function. "
+                    "The type can be 'file', 'class', or 'func'."
                 ),
                 args_schema=ReturnReferenceGraphArgs,
                 handle_tool_error=True,
@@ -152,8 +155,8 @@ class RepoFullSummaryAgentTools:
                 coroutine=self._return_file_summary_tool,
                 name="return_file_summary",
                 description=(
-                    "Return one file summary by exact or suffix file path from the scoped file-summary run. "
-                    "Use this to collect summary-level evidence quickly."
+                    "Read the summary for a specific file by name. "
+                    "Matches by exact path or suffix."
                 ),
                 args_schema=ReturnFileSummaryArgs,
                 handle_tool_error=True,
@@ -166,7 +169,7 @@ class RepoFullSummaryAgentTools:
         depth: int = 4,
         cursor: int = 0,
         page_size: int = 400,
-    ) -> dict[str, Any]:
+    ) -> str:
         result = await self._shared_tools.return_directory(
             repo_path=repo_path,
             depth=depth,
@@ -184,14 +187,14 @@ class RepoFullSummaryAgentTools:
             },
             result=result,
         )
-        return result
+        return _format_directory_result(result)
 
     async def _return_file_code_tool(
         self,
         use_path: str,
         start_line: int = 1,
         max_lines: int = 250,
-    ) -> dict[str, Any]:
+    ) -> str:
         result = await self._shared_tools.return_file_code(
             use_path=use_path,
             start_line=start_line,
@@ -207,14 +210,14 @@ class RepoFullSummaryAgentTools:
             },
             result=result,
         )
-        return result
+        return _format_file_code_result(result)
 
     async def _return_reference_graph_tool(
         self,
         type: str,
         input_subject: str,
         limit_each_direction: int = 25,
-    ) -> dict[str, Any]:
+    ) -> str:
         result = await self._shared_tools.return_reference_graph(
             type=type,
             input_subject=input_subject,
@@ -230,9 +233,9 @@ class RepoFullSummaryAgentTools:
             },
             result=result,
         )
-        return result
+        return _format_reference_graph_result(result)
 
-    async def _return_file_summary_tool(self, file_name: str) -> dict[str, Any]:
+    async def _return_file_summary_tool(self, file_name: str) -> str:
         result = await self.return_file_summary(file_name=file_name)
         _record_tool_trace(
             self.trace_sink,
@@ -240,7 +243,7 @@ class RepoFullSummaryAgentTools:
             arguments={"file_name": file_name},
             result=result,
         )
-        return result
+        return _format_file_summary_result(result)
 
     async def return_file_summary(self, *, file_name: str) -> dict:
         """Return one file summary payload by exact path or deterministic suffix match."""
@@ -349,8 +352,6 @@ class RepoFullSummarizer:
             payload.repo_path,
             payload.repo_address,
             payload.tech_stack,
-            payload.entry_points_trace,
-            payload.related_repo_info,
             self.prompt_version,
         ]
         input_hash = sha256("\n".join(material).encode("utf-8")).hexdigest()
@@ -360,8 +361,6 @@ class RepoFullSummarizer:
             prompt_version=self.prompt_version,
             tech=(payload.tech_stack or "unknown"),
             repo_path=payload.repo_path,
-            entry_points_trace=_truncate_text(payload.entry_points_trace or "", self.max_input_chars // 2),
-            related_repo_info=_truncate_text(payload.related_repo_info or "", self.max_input_chars // 2),
         )
 
         last_error: Exception | None = None
@@ -412,6 +411,29 @@ class RepoFullSummarizer:
         )
         output = RepoFullSummaryOutput.model_validate(_extract_readme_payload(agent_result.raw_text))
         return output, agent_result.raw_text, {"message_count": _message_count(agent_result.state)}
+
+
+def _format_file_summary_result(result: dict) -> str:
+    """Format file summary as compact text for LLM consumption."""
+
+    if "error" in result:
+        return f"[file_summary: {result['requested_file_name']} | error: {result['error']}]"
+    lines = [f"[file_summary: {result['resolved_subject_path']} | {result['match_type']} | {result.get('language', 'unknown')}]"]
+    lines.append(result["overall_summary"])
+    cluster = result.get("file_cluster", [])
+    if cluster:
+        lines.append("[cluster]")
+        for item in cluster:
+            lines.append(f"- {item}")
+    relationships = result.get("important_relationships", [])
+    if relationships:
+        lines.append("[relationships]")
+        for item in relationships:
+            lines.append(f"- {item}")
+    gf = result.get("group_function")
+    if gf:
+        lines.append(f"[group_function]\n{gf}")
+    return "\n".join(lines)
 
 
 def _record_tool_trace(

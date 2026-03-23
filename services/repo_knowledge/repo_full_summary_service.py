@@ -177,11 +177,44 @@ class RepoKnowledgeRepoFullSummaryService:
         return latest, readme
 
 
+@dataclass(slots=True)
+class RepoFullSummaryAgentConfig:
+    """Tunable agent parameters for repo full-summary runs.
+
+    Override at construction time or leave as defaults.
+    Env-var overrides from settings are applied in ``from_settings()``.
+    """
+
+    max_input_chars: int = 30_000
+    retry_count: int = 2
+    timeout_seconds: int = 90
+    max_iterations: int = 10
+    model_provider: str = "gemini"
+    model_name: str = "gemini-3-flash-preview"
+
+    @classmethod
+    def from_settings(cls) -> "RepoFullSummaryAgentConfig":
+        """Build config from env-var backed settings, using class defaults as fallbacks."""
+        settings = get_settings()
+        return cls(
+            max_input_chars=settings.REPO_FULL_SUMMARY_MAX_INPUT_CHARS,
+            retry_count=settings.REPO_FULL_SUMMARY_RETRY_COUNT,
+            timeout_seconds=settings.REPO_FULL_SUMMARY_TIMEOUT_SECONDS,
+            max_iterations=settings.REPO_FULL_SUMMARY_MAX_ITERATIONS,
+        )
+
+
 class RepoFullSummaryWorker:
     """Background worker that executes queued repo full-summary runs."""
 
-    def __init__(self, session: AsyncSession) -> None:
+    def __init__(
+        self,
+        session: AsyncSession,
+        *,
+        agent_config: RepoFullSummaryAgentConfig | None = None,
+    ) -> None:
         self.session = session
+        self.agent_config = agent_config or RepoFullSummaryAgentConfig.from_settings()
         self.repo_full_summary_run_repo = RepoFullSummaryRunRepository(session)
         self.repo_full_summary_repo = RepoFullSummaryRepository(session)
         self.repo_full_summary_diagnostic_repo = RepoFullSummaryDiagnosticRepository(session)
@@ -193,6 +226,7 @@ class RepoFullSummaryWorker:
 
     async def execute(self, *, repo_full_summary_run_id: str) -> None:
         settings = get_settings()
+        cfg = self.agent_config
         logger.info("Repo full-summary run start repo_full_summary_run_id=%s", repo_full_summary_run_id)
 
         run = await self.repo_full_summary_run_repo.get(repo_full_summary_run_id)
@@ -239,8 +273,8 @@ class RepoFullSummaryWorker:
         try:
             chat_model = create_summary_chat_model(
                 settings=settings,
-                provider_override=GEMINI_PROVIDER,
-                model_override=GEMINI_MODEL,
+                provider_override=cfg.model_provider,
+                model_override=cfg.model_name,
             )
         except SummaryModelFactoryError as exc:
             await self.repo_full_summary_run_repo.mark_failed(run, error_message=str(exc))
@@ -250,13 +284,13 @@ class RepoFullSummaryWorker:
         summarizer = RepoFullSummarizer(
             chat_model=chat_model,
             prompt_version=run.prompt_version,
-            max_input_chars=settings.REPO_FULL_SUMMARY_MAX_INPUT_CHARS,
-            retry_count=settings.REPO_FULL_SUMMARY_RETRY_COUNT,
-            timeout_seconds=settings.REPO_FULL_SUMMARY_TIMEOUT_SECONDS,
+            max_input_chars=cfg.max_input_chars,
+            retry_count=cfg.retry_count,
+            timeout_seconds=cfg.timeout_seconds,
             subject_repo=self.subject_repo,
             edge_repo=self.edge_repo,
             file_summary_repo=self.file_summary_repo,
-            max_iterations=settings.REPO_FULL_SUMMARY_MAX_ITERATIONS,
+            max_iterations=cfg.max_iterations,
         )
 
         counters = RepoFullSummaryCounters()
@@ -279,8 +313,6 @@ class RepoFullSummaryWorker:
                     repo_path=source_run.source_locator,
                     repo_address=source_run.repo_address,
                     tech_stack=_derive_tech_stack(summary_rows),
-                    entry_points_trace="",
-                    related_repo_info="",
                 )
             )
 

@@ -97,7 +97,6 @@ def _make_tools(tmp_path: Path) -> FileSummaryAgentTools:
         repo_address="repo-address",
         tech_stack="python",
         chunk_texts=["print('hello')"],
-        neighbors=[],
     )
     return FileSummaryAgentTools(
         payload=payload,
@@ -122,8 +121,9 @@ def test_return_directory_pagination(tmp_path: Path) -> None:
 
 def test_return_directory_blocks_path_escape(tmp_path: Path) -> None:
     tools = _make_tools(tmp_path)
-    with pytest.raises(ValueError):
-        asyncio.run(tools.return_directory(repo_path="../", depth=1))
+    result = asyncio.run(tools.return_directory(repo_path="../", depth=1))
+    assert "error" in result
+    assert result["total_entries"] == 0
 
 
 def test_return_file_code_paging(tmp_path: Path) -> None:
@@ -141,8 +141,9 @@ def test_return_file_code_paging(tmp_path: Path) -> None:
 
 def test_return_file_code_blocks_path_escape(tmp_path: Path) -> None:
     tools = _make_tools(tmp_path)
-    with pytest.raises(ValueError):
-        asyncio.run(tools.return_file_code(use_path="../secret.py"))
+    result = asyncio.run(tools.return_file_code(use_path="../secret.py"))
+    assert "error" in result
+    assert result["resolved_path"] is None
 
 
 def test_return_reference_graph_for_file(tmp_path: Path) -> None:

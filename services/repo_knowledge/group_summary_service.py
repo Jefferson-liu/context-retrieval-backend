@@ -232,11 +232,59 @@ class RepoKnowledgeGroupSummaryService:
         return latest, rows, member_map
 
 
+@dataclass(slots=True)
+class GroupSummaryAgentConfig:
+    """Tunable agent parameters for repo-manager architecture runs.
+
+    Override at construction time or leave as defaults.
+    Env-var overrides from settings are applied in ``from_settings()``.
+    """
+
+    # Grouping
+    max_group_tokens: int = 5_000
+    representative_count: int = 8
+
+    # Segment summarizer
+    segment_max_input_chars: int = 26_000
+    segment_retry_count: int = 2
+    segment_timeout_seconds: int = 60
+
+    # Architecture merger
+    merge_max_input_chars: int = 32_000
+    merge_retry_count: int = 2
+    merge_timeout_seconds: int = 90
+
+    # Model
+    model_provider: str = "gemini"
+    model_name: str = "gemini-2.5-flash"
+
+    @classmethod
+    def from_settings(cls) -> "GroupSummaryAgentConfig":
+        """Build config from env-var backed settings, using class defaults as fallbacks."""
+        settings = get_settings()
+        return cls(
+            max_group_tokens=settings.REPO_MANAGER_MAX_GROUP_TOKENS,
+            representative_count=settings.REPO_GROUP_REPRESENTATIVE_COUNT,
+            segment_max_input_chars=settings.REPO_MANAGER_MAX_INPUT_CHARS,
+            segment_retry_count=settings.REPO_MANAGER_RETRY_COUNT,
+            segment_timeout_seconds=settings.REPO_MANAGER_TIMEOUT_SECONDS,
+            merge_max_input_chars=settings.REPO_ARCHITECTURE_MERGE_MAX_INPUT_CHARS,
+            merge_retry_count=settings.REPO_ARCHITECTURE_MERGE_RETRY_COUNT,
+            merge_timeout_seconds=settings.REPO_ARCHITECTURE_MERGE_TIMEOUT_SECONDS,
+        )
+
+
 class RepoGroupSummaryWorker:
     """Background worker that executes queued repo-manager architecture runs."""
 
-    def __init__(self, session: AsyncSession) -> None:
+    def __init__(
+        self,
+        session: AsyncSession,
+        *,
+        agent_config: GroupSummaryAgentConfig | None = None,
+    ) -> None:
         self.session = session
+        self.agent_config = agent_config or GroupSummaryAgentConfig.from_settings()
         self.group_summary_run_repo = RepoGroupSummaryRunRepository(session)
         self.run_repo = RepoRunRepository(session)
         self.file_summary_run_repo = RepoFileSummaryRunRepository(session)
@@ -250,6 +298,7 @@ class RepoGroupSummaryWorker:
 
     async def execute(self, *, group_summary_run_id: str) -> None:
         settings = get_settings()
+        cfg = self.agent_config
         logger.info("Repo group-summary run start group_summary_run_id=%s", group_summary_run_id)
 
         run = await self.group_summary_run_repo.get(group_summary_run_id)
@@ -293,8 +342,8 @@ class RepoGroupSummaryWorker:
         try:
             chat_model = create_summary_chat_model(
                 settings=settings,
-                provider_override=GEMINI_PROVIDER,
-                model_override=GEMINI_MODEL,
+                provider_override=cfg.model_provider,
+                model_override=cfg.model_name,
             )
         except SummaryModelFactoryError as exc:
             await self.group_summary_run_repo.mark_failed(run, error_message=str(exc))
@@ -302,21 +351,21 @@ class RepoGroupSummaryWorker:
             return
 
         grouper = AdaptiveDependencyRepoManager(
-            max_group_tokens=settings.REPO_MANAGER_MAX_GROUP_TOKENS,
-            representative_count=settings.REPO_GROUP_REPRESENTATIVE_COUNT,
+            max_group_tokens=cfg.max_group_tokens,
+            representative_count=cfg.representative_count,
         )
         summarizer = RepoGroupSummarizer(
             chat_model=chat_model,
             prompt_version=run.prompt_version,
-            max_input_chars=settings.REPO_MANAGER_MAX_INPUT_CHARS,
-            retry_count=settings.REPO_MANAGER_RETRY_COUNT,
-            timeout_seconds=settings.REPO_MANAGER_TIMEOUT_SECONDS,
+            max_input_chars=cfg.segment_max_input_chars,
+            retry_count=cfg.segment_retry_count,
+            timeout_seconds=cfg.segment_timeout_seconds,
         )
         merger = RepoArchitectureMerger(
             chat_model=chat_model,
-            max_input_chars=settings.REPO_ARCHITECTURE_MERGE_MAX_INPUT_CHARS,
-            retry_count=settings.REPO_ARCHITECTURE_MERGE_RETRY_COUNT,
-            timeout_seconds=settings.REPO_ARCHITECTURE_MERGE_TIMEOUT_SECONDS,
+            max_input_chars=cfg.merge_max_input_chars,
+            retry_count=cfg.merge_retry_count,
+            timeout_seconds=cfg.merge_timeout_seconds,
         )
 
         counters = GroupSummaryCounters()

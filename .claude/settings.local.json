@@ -1,0 +1,20 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(.venv/Scripts/python.exe -c \"from routers.repo_knowledge_repo_manager_router import router; print\\(''OK''\\)\")",
+      "Bash(.venv/Scripts/python.exe -m pytest -q tests/repo_knowledge)",
+      "Bash(python -m pytest tests/ -x -q)",
+      "Bash(python -m pytest tests/repo_knowledge/ -x -q)",
+      "Bash(curl -s \"http://localhost:8000/repo-knowledge/file-summary-runs/3de046fa-4175-4842-9862-95e378f159ce/diagnostics?severity=error&limit=100\")",
+      "Bash(python -m json.tool)",
+      "Bash(python -c \":*)",
+      "WebSearch",
+      "Bash(python -m pytest tests/repo_knowledge/test_file_summarizer.py -x -q)",
+      "Bash(python -m pytest tests/repo_knowledge/test_repo_full_summarizer.py -v)",
+      "Bash(python -m pytest tests/repo_knowledge/test_repo_full_summarizer.py tests/repo_knowledge/test_prompt_loader.py -v)",
+      "Bash(python -m pytest tests/repo_knowledge/ -v)",
+      "Bash(python -m pytest tests/repo_knowledge/test_prompt_loader.py tests/repo_knowledge/test_file_summarizer.py -v)",
+      "Bash(grep -l \"class.*Repository\" \"/c/Users/Jefferson Liu/Desktop/programming stuff/context-retrieval-poc/context-retrieval-backend/infrastructure/repositories/\"*.py)"
+    ]
+  }
+}

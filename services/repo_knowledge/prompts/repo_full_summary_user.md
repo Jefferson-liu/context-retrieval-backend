@@ -3,25 +3,21 @@ Used tech stack: {tech}
 Repository path: {repo_path}
 
 Task:
-Write a concise README for this repository so a developer can quickly understand the architecture and organization.
+Produce a business-logic-focused summary of this repository. The goal is to document **what the software does and how it does it** — not how to set it up.
 
-Reference README structure:
-1. Project Overview (required)
-2. Quick Start (leave blank if insufficient data)
-3. Tech Stack and Key Dependencies (optional as available)
-4. Project File Structure
-5. Core Features Overview
-6. Key Entry Points
-7. Other Relevant Sections (optional, only if supported by evidence)
+Required README structure:
+1. **Project Overview** (required) — Project name and 2-4 sentences explaining what the project does, who it serves, and the core problem it solves.
+2. **Project Structure** — High-level directory layout showing where the key code lives.
+3. **Core Features** (required, this is the most important section) — Identify each distinct business feature or subsystem. For EACH feature, create a dedicated subsection with:
+   - **Key Files**: List the specific files that implement this feature (with paths).
+   - **How It Works**: A detailed explanation of the actual logic — algorithms, scoring formulas, data transformations, decision trees, pipeline stages, matching rules, etc. Do NOT be vague. If there is a scoring engine, explain what factors are weighted and how. If there is a pipeline, describe each stage and what it does to the data.
+   - **Data Flow**: Where inputs come from, how they are processed, and what outputs are produced.
+4. **Key Entry Points** — The main entry files and API endpoints for the application.
+5. **Cross-Cutting Concerns** (optional) — Only if the repo has notable patterns like shared middleware, event systems, or data access layers that span multiple features.
 
-Important program entry files and traces:
-{entry_points_trace}
+DO NOT include: environment setup, installation instructions, quick start guides, `.env` configuration, `localhost` URLs, dependency install commands, database migration steps, or tech stack/dependency lists.
 
-Related upstream/downstream repository information:
-{related_repo_info}
-
-You can use tool calls to inspect directory structure, file code, reference graph, and file summaries as needed.
-Only keep content you are confident about.
+Use tool calls to inspect directory structure, file code, reference graphs, and file summaries to understand the business logic deeply. Do not guess — only include information verified through inspection.
 
 Return final output using:
 【markdown_start】

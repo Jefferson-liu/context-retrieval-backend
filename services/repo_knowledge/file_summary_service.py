@@ -256,11 +256,43 @@ class RepoKnowledgeFileSummaryService:
         return run, agg
 
 
+@dataclass(slots=True)
+class FileSummaryAgentConfig:
+    """Tunable agent parameters for file-summary runs.
+
+    Override at construction time or leave as defaults.
+    Env-var overrides from settings are applied in ``from_settings()``.
+    """
+
+    max_input_chars: int = 24_000
+    map_chunk_chars: int = 6_000
+    retry_count: int = 2
+    timeout_seconds: int = 60
+    max_iterations: int = 6
+
+    @classmethod
+    def from_settings(cls) -> "FileSummaryAgentConfig":
+        """Build config from env-var backed settings, using class defaults as fallbacks."""
+        settings = get_settings()
+        return cls(
+            max_input_chars=settings.REPO_SUMMARY_MAX_INPUT_CHARS,
+            map_chunk_chars=settings.REPO_SUMMARY_MAP_CHUNK_CHARS,
+            retry_count=settings.REPO_SUMMARY_RETRY_COUNT,
+            timeout_seconds=settings.REPO_SUMMARY_TIMEOUT_SECONDS,
+        )
+
+
 class RepoFileSummaryWorker:
     """Background worker that executes queued repository summary file_summary runs."""
 
-    def __init__(self, session: AsyncSession) -> None:
+    def __init__(
+        self,
+        session: AsyncSession,
+        *,
+        agent_config: FileSummaryAgentConfig | None = None,
+    ) -> None:
         self.session = session
+        self.agent_config = agent_config or FileSummaryAgentConfig.from_settings()
         self.file_summary_run_repo = RepoFileSummaryRunRepository(session)
         self.run_repo = RepoRunRepository(session)
         self.snapshot_repo = RepoSnapshotRepository(session)
@@ -273,6 +305,7 @@ class RepoFileSummaryWorker:
 
     async def execute(self, *, file_summary_run_id: str) -> None:
         settings = get_settings()
+        cfg = self.agent_config
         logger.info("Repo summary file_summary start file_summary_run_id=%s", file_summary_run_id)
         run = await self.file_summary_run_repo.get(file_summary_run_id)
         if run is None:
@@ -313,17 +346,16 @@ class RepoFileSummaryWorker:
         summarizer = RepoFileSummarizer(
             chat_model=chat_model,
             prompt_version=run.prompt_version,
-            max_input_chars=settings.REPO_SUMMARY_MAX_INPUT_CHARS,
-            map_chunk_chars=settings.REPO_SUMMARY_MAP_CHUNK_CHARS,
-            retry_count=settings.REPO_SUMMARY_RETRY_COUNT,
-            timeout_seconds=settings.REPO_SUMMARY_TIMEOUT_SECONDS,
+            max_input_chars=cfg.max_input_chars,
+            map_chunk_chars=cfg.map_chunk_chars,
+            retry_count=cfg.retry_count,
+            timeout_seconds=cfg.timeout_seconds,
+            max_iterations=cfg.max_iterations,
             subject_repo=self.subject_repo,
             edge_repo=self.edge_repo,
         )
         assembler = SummaryContextAssembler(
             chunk_repo=self.chunk_repo,
-            edge_repo=self.edge_repo,
-            neighbor_limit_each_direction=settings.REPO_SUMMARY_NEIGHBOR_LIMIT_EACH_DIRECTION,
         )
 
         counters = FileSummaryCounters()
@@ -470,4 +502,6 @@ def _classify_file_summary_failure(exc: Exception) -> tuple[str, str]:
         return "thought_signature_missing", "summary_file_summary_agent_protocol_failed"
     if isinstance(exc, asyncio.TimeoutError):
         return "agent_timeout", "summary_file_summary_agent_timeout"
+    if "recursion limit" in raw or "graphrecursionerror" in raw:
+        return "recursion_limit", "summary_file_summary_agent_recursion_limit"
     return "summary_failed", "summary_file_summary_failed"

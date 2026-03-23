@@ -12,7 +12,10 @@ Member evidence:
 {member_evidence}
 
 Task:
-- Treat this group as one Repo Manager segment.
-- Infer the segment's business role and internal architectural structure.
-- Produce a Mermaid flowchart for this segment using file names, object names, or function names that appear in the evidence.
-- Ignore tests, logging, and incidental utility detail unless they are architecturally important.
+- Treat this group as one sub-repository segment.
+- Based on the member evidence, reconstruct the sub-business functional architecture for this segment.
+- Abstract each business functional module and describe it as a Mermaid flowchart.
+- Use `subgraph` to represent aggregation relationships between modules.
+- Node names must use the original file names, object names, or function names from the evidence — do not invent abstract names.
+- Edge labels must use descriptive names that explain the relationship.
+- Appropriately ignore non-functional code such as logs, monitoring, tests, and auxiliary code, unless they are architecturally important. Deployment-related and architectural design patterns should be considered as supplements.

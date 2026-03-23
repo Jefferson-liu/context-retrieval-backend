@@ -6,7 +6,7 @@ from contextlib import suppress
 
 from config.settings import get_settings
 from infrastructure.database import SessionLocal
-from infrastructure.repositories import RepoGroupSummaryRunRepository
+from infrastructure.repositories import RepoManagerRunRepository
 from services.repo_knowledge.repo_manager_service import RepoManagerWorker
 
 logger = logging.getLogger(__name__)
@@ -29,7 +29,7 @@ class RepoManagerBackgroundRunner:
         logger.info("Repo manager runner starting workers=%s", self.max_concurrent_runs)
 
         async with SessionLocal() as session:
-            repo = RepoGroupSummaryRunRepository(session)
+            repo = RepoManagerRunRepository(session)
             stale_count = await repo.mark_stale_runs_failed()
             if stale_count:
                 logger.warning("Marked %s stale repo-manager runs as failed", stale_count)

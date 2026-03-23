@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 from dataclasses import dataclass
 from hashlib import sha256
 
@@ -103,7 +104,7 @@ class RepoArchitectureMerger:
                 )
                 raw_text = self._response_to_text(response)
                 last_raw_text = raw_text
-                output = ArchitectureMergeOutput.model_validate(_extract_json(raw_text))
+                output = ArchitectureMergeOutput.model_validate(_extract_architecture_merge_payload(raw_text))
                 return ArchitectureMergeResult(
                     output=output,
                     raw_output={"mode": "single_pass", "raw_text": raw_text},
@@ -179,6 +180,40 @@ def _extract_json(raw: str) -> dict:
     if start < 0 or end < 0 or end <= start:
         raise ValueError("Model output does not contain a JSON object")
     return json.loads(candidate[start : end + 1])
+
+
+def _extract_architecture_merge_payload(raw: str) -> dict:
+    """Extract architecture merge payload from tagged sections or JSON fallback."""
+
+    tagged = _extract_tagged_architecture_merge_payload(raw)
+    if tagged is not None:
+        return tagged
+    return _extract_json(raw)
+
+
+def _extract_tagged_architecture_merge_payload(raw: str) -> dict | None:
+    """Extract architecture merge fields from tagged output."""
+
+    overall_summary = _extract_tag_section(raw, "Overall_Summary_start", "Overall_Summary_end")
+    mermaid = _extract_tag_section(raw, "Mermaid_Diagram_start", "Mermaid_Diagram_end")
+
+    if overall_summary is None or not overall_summary.strip():
+        return None
+    if mermaid is None or not mermaid.strip():
+        return None
+
+    return {
+        "overall_summary": overall_summary.strip(),
+        "mermaid_diagram": mermaid.strip(),
+    }
+
+
+def _extract_tag_section(raw: str, start_tag: str, end_tag: str) -> str | None:
+    pattern = re.compile(rf"\[{re.escape(start_tag)}\](.*?)\[{re.escape(end_tag)}\]", flags=re.DOTALL)
+    match = pattern.search(raw)
+    if not match:
+        return None
+    return match.group(1).strip()
 
 
 def _truncate_text(value: str, max_chars: int) -> str:

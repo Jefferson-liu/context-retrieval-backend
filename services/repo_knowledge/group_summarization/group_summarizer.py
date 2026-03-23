@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 from dataclasses import dataclass
 from hashlib import sha256
 from typing import Any
@@ -134,7 +135,7 @@ class RepoGroupSummarizer:
                 )
                 raw_text = self._response_to_text(response)
                 last_raw_text = raw_text
-                payload = _normalize_group_summary_payload(_extract_json(raw_text))
+                payload = _normalize_group_summary_payload(_extract_group_summary_payload(raw_text))
                 output = GroupSummaryOutput.model_validate(payload)
                 return output, raw_text
             except Exception as exc:  # pragma: no cover - runtime LLM failures
@@ -190,6 +191,75 @@ def _extract_json(raw: str) -> dict:
         raise ValueError("Model output does not contain a JSON object")
     return json.loads(candidate[start : end + 1])
 
+
+
+def _extract_group_summary_payload(raw: str) -> dict:
+    """Extract group summary payload from tagged sections or JSON fallback."""
+
+    tagged = _extract_tagged_group_summary_payload(raw)
+    if tagged is not None:
+        return tagged
+    return _extract_json(raw)
+
+
+def _extract_tagged_group_summary_payload(raw: str) -> dict | None:
+    """Extract group summary fields from tagged output."""
+
+    overall_summary = _extract_tag_section(raw, "Overall_Summary_start", "Overall_Summary_end")
+    if overall_summary is None or not overall_summary.strip():
+        return None
+
+    name = _extract_tag_section(raw, "Name_start", "Name_end")
+    business_purpose = _extract_tag_section(raw, "Business_Purpose_start", "Business_Purpose_end")
+    responsibilities = _extract_tag_section(raw, "Responsibilities_start", "Responsibilities_end")
+    tags = _extract_tag_section(raw, "Tags_start", "Tags_end")
+    rep_ids = _extract_tag_section(raw, "Representative_Subject_Ids_start", "Representative_Subject_Ids_end")
+    mermaid = _extract_tag_section(raw, "Mermaid_Diagram_start", "Mermaid_Diagram_end")
+    is_infra = _extract_tag_section(raw, "Is_Infrastructure_start", "Is_Infrastructure_end")
+    confidence = _extract_tag_section(raw, "Confidence_start", "Confidence_end")
+
+    result: dict = {
+        "name": (name.strip() if name else "Segment"),
+        "overall_summary": overall_summary.strip(),
+        "business_purpose": (business_purpose.strip() if business_purpose else overall_summary.strip()),
+        "responsibilities": _parse_tag_list(responsibilities),
+        "tags": _parse_tag_list(tags),
+        "representative_subject_ids": _parse_tag_list(rep_ids),
+        "is_infrastructure": (is_infra.strip().lower() == "true" if is_infra else False),
+    }
+    if mermaid and mermaid.strip():
+        result["mermaid_diagram"] = mermaid.strip()
+    if confidence and confidence.strip():
+        try:
+            result["confidence"] = float(confidence.strip())
+        except ValueError:
+            pass
+    return result
+
+
+def _extract_tag_section(raw: str, start_tag: str, end_tag: str) -> str | None:
+    pattern = re.compile(rf"\[{re.escape(start_tag)}\](.*?)\[{re.escape(end_tag)}\]", flags=re.DOTALL)
+    match = pattern.search(raw)
+    if not match:
+        return None
+    return match.group(1).strip()
+
+
+def _parse_tag_list(value: str | None) -> list[str]:
+    if not value:
+        return []
+    items: list[str] = []
+    for line in value.splitlines():
+        normalized = line.strip().strip(",")
+        if not normalized:
+            continue
+        normalized = re.sub(r"^[-*]\s*", "", normalized)
+        normalized = re.sub(r"^\d+\.\s*", "", normalized)
+        if normalized:
+            items.append(normalized)
+    if items:
+        return items
+    return [part.strip() for part in value.split(",") if part.strip()]
 
 
 def _normalize_group_summary_payload(payload: dict) -> dict:

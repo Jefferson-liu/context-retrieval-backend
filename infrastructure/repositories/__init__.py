@@ -21,6 +21,10 @@ from .repo_manager_run_repository import RepoManagerRunRepository
 from .repo_manager_segment_repository import RepoManagerSegmentRepository
 from .repo_manager_segment_summary_repository import RepoManagerSegmentSummaryRepository
 from .repo_manager_diagnostic_repository import RepoManagerDiagnosticRepository
+from .repo_group_summary_run_repository import RepoGroupSummaryRunRepository
+from .repo_group_summary_repository import RepoGroupSummaryRepository
+from .repo_group_summary_diagnostic_repository import RepoGroupSummaryDiagnosticRepository
+from .repo_summary_group_repository import RepoSummaryGroupRepository
 
 __all__ = [
     "DataRepository",
@@ -46,4 +50,8 @@ __all__ = [
     "RepoManagerSegmentRepository",
     "RepoManagerSegmentSummaryRepository",
     "RepoManagerDiagnosticRepository",
+    "RepoGroupSummaryRunRepository",
+    "RepoGroupSummaryRepository",
+    "RepoGroupSummaryDiagnosticRepository",
+    "RepoSummaryGroupRepository",
 ]

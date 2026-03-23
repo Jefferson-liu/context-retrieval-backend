@@ -28,7 +28,6 @@ def _payload(*, repo_path: str = "/tmp/repo", subject_path: str = "x.py") -> Sum
         repo_address="repo-address",
         tech_stack="python",
         chunk_texts=["print('hello')"],
-        neighbors=[],
     )
 
 
@@ -53,8 +52,7 @@ def test_repo_file_summarizer_empty_payload_is_deterministic() -> None:
                 repo_address="repo-address",
                 tech_stack="python",
                 chunk_texts=[],
-                neighbors=[],
-            )
+                    )
         )
     )
     assert result.output.overall_summary == "Empty file with no content to summarize."
@@ -160,6 +158,50 @@ def test_repo_file_summarizer_react_executes_tool(tmp_path: Path, monkeypatch: p
     assert result.output.overall_summary == "sum"
     assert len(result.raw_output["tool_trace"]) == 1
     assert result.raw_output["tool_trace"][0]["name"] == "return_file_code"
+
+
+def test_repo_file_summarizer_recursion_limit_falls_back_to_synthesis(monkeypatch: pytest.MonkeyPatch) -> None:
+    """When the agent hits the recursion limit, a direct synthesis call is made."""
+
+    class _GraphRecursionError(Exception):
+        pass
+
+    async def _fake_invoke(**_kwargs):  # noqa: ANN003
+        raise _GraphRecursionError(
+            "Recursion limit of 10 reached without hitting a stop condition."
+        )
+
+    class _FakeChatModel:
+        async def ainvoke(self, messages):  # noqa: ANN001
+            from types import SimpleNamespace
+
+            return SimpleNamespace(
+                content=(
+                    "[File_cluster_begin]\n[File_cluster_end]\n"
+                    "[Overall_Summary_start]\nSynthesis fallback summary\n[Overall_Summary_end]\n"
+                    "[Important_Relationships_start]\n[Important_Relationships_end]\n"
+                    "[Group_Function_start]\n[Group_Function_end]"
+                ),
+                type="ai",
+                usage_metadata={"input_tokens": 10, "output_tokens": 20, "total_tokens": 30},
+            )
+
+    monkeypatch.setattr(
+        "services.repo_knowledge.summarization.file_summarizer.invoke_react_agent",
+        _fake_invoke,
+    )
+    summarizer = RepoFileSummarizer(
+        chat_model=_FakeChatModel(),  # type: ignore[arg-type]
+        prompt_version="v1",
+        max_input_chars=200,
+        map_chunk_chars=100,
+        retry_count=1,
+        timeout_seconds=10,
+        max_iterations=4,
+    )
+    result = asyncio.run(summarizer.summarize(payload=_payload()))
+    assert result.output.overall_summary == "Synthesis fallback summary"
+    assert result.raw_output["agent"].get("synthesis_fallback") is True
 
 
 def test_repo_file_summarizer_protocol_error_bubbles(monkeypatch: pytest.MonkeyPatch) -> None:

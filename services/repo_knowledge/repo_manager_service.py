@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from infrastructure.models import RepoGroupSummaryRunRecord
+from infrastructure.models import RepoManagerRunRecord
 from schemas.repo_knowledge_repo_manager import RepoManagerRunCreateRequest
 from services.repo_knowledge.group_summary_service import (
     RepoGroupSummaryError,
@@ -27,7 +27,7 @@ class RepoKnowledgeRepoManagerService(RepoKnowledgeGroupSummaryService):
     async def create_repo_manager_run(
         self,
         payload: RepoManagerRunCreateRequest,
-    ) -> RepoGroupSummaryRunRecord:
+    ) -> RepoManagerRunRecord:
         return await super().create_group_summary_run(
             payload=_LegacyGroupSummaryCreateRequest(
                 source_file_summary_run_id=payload.source_file_summary_run_id,

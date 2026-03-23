@@ -22,5 +22,3 @@ class RepoFullSummaryInput:
     repo_path: str
     repo_address: str
     tech_stack: str
-    entry_points_trace: str = ""
-    related_repo_info: str = ""

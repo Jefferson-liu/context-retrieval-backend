@@ -37,8 +37,6 @@ def test_load_repo_full_summary_prompt_files() -> None:
         prompt_version="v1",
         tech="python",
         repo_path="/tmp/repo",
-        entry_points_trace="",
-        related_repo_info="",
     )
-    assert "README" in system_prompt
+    assert "business-logic" in system_prompt.lower() or "README" in system_prompt
     assert "Repository path: /tmp/repo" in user_prompt

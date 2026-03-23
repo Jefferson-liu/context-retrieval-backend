@@ -17,18 +17,6 @@ class SummaryOutput(BaseModel):
 
 
 @dataclass(slots=True)
-class SummaryNeighbor:
-    """Graph-neighbor detail used to enrich summary prompts."""
-
-    direction: str
-    edge_type: str
-    related_subject_path: str
-    related_subject_type: str
-    line: int | None = None
-    column: int | None = None
-
-
-@dataclass(slots=True)
 class SummaryInput:
     """Assembled per-file context passed to the file summarizer."""
 
@@ -41,4 +29,3 @@ class SummaryInput:
     repo_address: str | None = None
     tech_stack: str | None = None
     chunk_texts: list[str] = field(default_factory=list)
-    neighbors: list[SummaryNeighbor] = field(default_factory=list)

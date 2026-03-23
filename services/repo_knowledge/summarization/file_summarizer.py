@@ -10,6 +10,7 @@ import re
 from typing import TYPE_CHECKING, Any
 
 from langchain_core.language_models.chat_models import BaseChatModel
+from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.tools import StructuredTool
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -19,6 +20,7 @@ from services.repo_knowledge.summarization.react_agent_runtime import (
     extract_full_trace_from_state,
     invoke_react_agent,
     log_react_agent_dependency_versions,
+    response_to_text,
 )
 from services.repo_knowledge.summarization.types import SummaryInput, SummaryOutput
 
@@ -31,6 +33,13 @@ logger = logging.getLogger(__name__)
 FILE_SUMMARY_SYSTEM_PROMPT = load_prompt("file_summary_system")
 FILE_SUMMARY_MAX_SOURCE_SNIPPET_CHARS = 12000
 FILE_SUMMARY_MAX_TOOL_PREVIEW_CHARS = 1200
+
+_SYNTHESIS_FALLBACK_INSTRUCTION = (
+    "You have run out of tool call budget. Produce your summary now using only "
+    "the code provided above. Do not reference files you have not inspected — "
+    "leave the Important_Relationships and Group_Function sections empty if you "
+    "are uncertain. Focus on what you can directly observe from the provided code."
+)
 
 
 class ReturnDirectoryArgs(BaseModel):
@@ -101,8 +110,7 @@ class FileSummaryAgentTools:
                 coroutine=self._return_directory_tool,
                 name="return_directory",
                 description=(
-                    "Return repository directory entries under repo_path with bounded depth and pagination. "
-                    "Use this when the agent needs project structure."
+                    "Retrieve the project directory structure for a given path with bounded depth and pagination."
                 ),
                 args_schema=ReturnDirectoryArgs,
                 handle_tool_error=True,
@@ -111,8 +119,9 @@ class FileSummaryAgentTools:
                 coroutine=self._return_file_code_tool,
                 name="return_file_code",
                 description=(
-                    "Read source code for one repository file with line-based paging. "
-                    "Use this when more code details are needed."
+                    "Read the content of a code file. The use_path should be a relative path "
+                    "with the correct file extension (e.g. .py for Python, .c/.h for C). "
+                    "Supports line-based paging via start_line and max_lines."
                 ),
                 args_schema=ReturnFileCodeArgs,
                 handle_tool_error=True,
@@ -121,8 +130,8 @@ class FileSummaryAgentTools:
                 coroutine=self._return_reference_graph_tool,
                 name="return_reference_graph",
                 description=(
-                    "Return incoming/outgoing reference edges for a file/class/function subject "
-                    "from the ingested repository graph."
+                    "Retrieve the reference and reverse-reference graph for a file, class, or function. "
+                    "The type can be 'file', 'class', or 'func'."
                 ),
                 args_schema=ReturnReferenceGraphArgs,
                 handle_tool_error=True,
@@ -135,7 +144,7 @@ class FileSummaryAgentTools:
         depth: int = 4,
         cursor: int = 0,
         page_size: int = 400,
-    ) -> dict[str, Any]:
+    ) -> str:
         result = await self.return_directory(
             repo_path=repo_path,
             depth=depth,
@@ -153,14 +162,14 @@ class FileSummaryAgentTools:
             },
             result=result,
         )
-        return result
+        return _format_directory_result(result)
 
     async def _return_file_code_tool(
         self,
         use_path: str,
         start_line: int = 1,
         max_lines: int = 250,
-    ) -> dict[str, Any]:
+    ) -> str:
         result = await self.return_file_code(
             use_path=use_path,
             start_line=start_line,
@@ -176,14 +185,14 @@ class FileSummaryAgentTools:
             },
             result=result,
         )
-        return result
+        return _format_file_code_result(result)
 
     async def _return_reference_graph_tool(
         self,
         type: str,
         input_subject: str,
         limit_each_direction: int = 25,
-    ) -> dict[str, Any]:
+    ) -> str:
         result = await self.return_reference_graph(
             type=type,
             input_subject=input_subject,
@@ -199,7 +208,7 @@ class FileSummaryAgentTools:
             },
             result=result,
         )
-        return result
+        return _format_reference_graph_result(result)
 
     async def return_directory(
         self,
@@ -211,7 +220,17 @@ class FileSummaryAgentTools:
     ) -> dict:
         """Return paginated directory entries within the scoped repository root."""
 
-        root = self._resolve_repo_directory(repo_path)
+        try:
+            root = self._resolve_repo_directory(repo_path)
+        except (ValueError, OSError) as exc:
+            return {
+                "repo_path": repo_path,
+                "error": str(exc),
+                "total_entries": 0,
+                "entries": [],
+                "has_more": False,
+                "next_cursor": None,
+            }
         base_depth = len(root.relative_to(self.repo_root).parts)
         entries: list[dict[str, str]] = []
 
@@ -254,7 +273,20 @@ class FileSummaryAgentTools:
     ) -> dict:
         """Return paginated code lines for one repository file."""
 
-        target = self._resolve_repo_file(use_path)
+        try:
+            target = self._resolve_repo_file(use_path)
+        except (ValueError, OSError) as exc:
+            return {
+                "use_path": use_path,
+                "resolved_path": None,
+                "error": str(exc),
+                "start_line": start_line,
+                "end_line": start_line - 1,
+                "total_lines": 0,
+                "has_more": False,
+                "next_start_line": None,
+                "content": "",
+            }
         text = _read_text_safely(target)
         lines = text.splitlines()
         total_lines = len(lines)
@@ -474,7 +506,7 @@ class RepoFileSummarizer:
         timeout_seconds: int,
         subject_repo: RepoSubjectRepository | None = None,
         edge_repo: RepoEdgeRepository | None = None,
-        max_iterations: int = 8,
+        max_iterations: int = 3,
     ) -> None:
         self.chat_model = chat_model
         self.prompt_version = prompt_version
@@ -496,10 +528,6 @@ class RepoFileSummarizer:
             payload.repo_address or "",
             payload.tech_stack or "",
             *payload.chunk_texts,
-            *[
-                f"{n.direction}:{n.edge_type}:{n.related_subject_path}:{n.related_subject_type}:{n.line}:{n.column}"
-                for n in payload.neighbors
-            ],
             self.prompt_version,
         ]
         input_hash = sha256("\n".join(material).encode("utf-8")).hexdigest()
@@ -576,19 +604,61 @@ class RepoFileSummarizer:
             trace_sink=tool_trace,
         ).as_langchain_tools()
         t0 = _time.perf_counter()
-        agent_result = await invoke_react_agent(
-            chat_model=self.chat_model,
-            tools=tools,
-            system_prompt=FILE_SUMMARY_SYSTEM_PROMPT,
-            user_prompt=user_prompt,
-            timeout_seconds=self.timeout_seconds,
-            max_iterations=self.max_iterations,
-        )
+
+        try:
+            agent_result = await invoke_react_agent(
+                chat_model=self.chat_model,
+                tools=tools,
+                system_prompt=FILE_SUMMARY_SYSTEM_PROMPT,
+                user_prompt=user_prompt,
+                timeout_seconds=self.timeout_seconds,
+                max_iterations=self.max_iterations,
+            )
+            duration_ms = int((_time.perf_counter() - t0) * 1000)
+            usage_trace = extract_full_trace_from_state(agent_result.state)
+            usage_trace["duration_ms"] = duration_ms
+            output = SummaryOutput.model_validate(_extract_summary_payload(agent_result.raw_text))
+            return output, agent_result.raw_text, {"message_count": _message_count(agent_result.state)}, usage_trace
+        except Exception as exc:
+            if not _is_recursion_limit_error(exc):
+                raise
+            logger.warning(
+                "Agent hit recursion limit for %s — falling back to direct synthesis",
+                payload.subject_path,
+            )
+
+        # Phase 2: forced synthesis without tools
+        raw_text, usage_trace = await self._synthesize_without_tools(user_prompt)
         duration_ms = int((_time.perf_counter() - t0) * 1000)
-        usage_trace = extract_full_trace_from_state(agent_result.state)
         usage_trace["duration_ms"] = duration_ms
-        output = SummaryOutput.model_validate(_extract_summary_payload(agent_result.raw_text))
-        return output, agent_result.raw_text, {"message_count": _message_count(agent_result.state)}, usage_trace
+        output = SummaryOutput.model_validate(_extract_summary_payload(raw_text))
+        return output, raw_text, {"message_count": 0, "synthesis_fallback": True}, usage_trace
+
+    async def _synthesize_without_tools(self, user_prompt: str) -> tuple[str, dict]:
+        """Single LLM call without tools to force summary output on budget exhaustion."""
+
+        messages = [
+            SystemMessage(content=FILE_SUMMARY_SYSTEM_PROMPT),
+            HumanMessage(content=user_prompt + "\n\n" + _SYNTHESIS_FALLBACK_INSTRUCTION),
+        ]
+        response = await self.chat_model.ainvoke(messages)
+        raw_text = response_to_text(response)
+        if not raw_text.strip():
+            raise ValueError("Synthesis fallback produced empty response")
+
+        usage = getattr(response, "usage_metadata", None) or {}
+        usage_trace = {
+            "total_input_tokens": usage.get("input_tokens", 0) or 0,
+            "total_output_tokens": usage.get("output_tokens", 0) or 0,
+            "total_tokens": usage.get("total_tokens", 0) or 0,
+            "cached_input_tokens": 0,
+            "reasoning_tokens": 0,
+            "llm_step_count": 1,
+            "tool_call_count": 0,
+            "steps": [],
+            "synthesis_fallback": True,
+        }
+        return raw_text, usage_trace
 
     @staticmethod
     def _join_chunks(chunks: list[str], max_chars: int) -> str:
@@ -653,16 +723,83 @@ def _read_text_safely(path: Path) -> str:
         return raw.decode("latin-1", errors="replace")
 
 
-def _extract_summary_payload(raw: str) -> dict:
-    """Extract a summary payload from strict JSON or tagged sections."""
+def _is_recursion_limit_error(exc: Exception) -> bool:
+    """Check whether the exception is a LangGraph recursion limit error."""
 
-    try:
-        return _extract_json(raw)
-    except Exception as first_error:
-        tagged_payload = _extract_tagged_payload(raw)
-        if tagged_payload is not None:
-            return tagged_payload
-        raise first_error
+    raw = str(exc).lower()
+    return "recursion limit" in raw or "graphrecursionerror" in raw
+
+
+def _format_directory_result(result: dict) -> str:
+    """Format directory listing as compact text for LLM consumption."""
+
+    if "error" in result:
+        return f"[directory: {result['repo_path']} | error: {result['error']}]"
+    lines = [f"[directory: {result['repo_path']} | {result['total_entries']} entries]"]
+    for entry in result["entries"]:
+        prefix = "D" if entry["type"] == "dir" else "F"
+        lines.append(f"{prefix} {entry['path']}")
+    if result["has_more"]:
+        lines.append(f"[next_cursor: {result['next_cursor']}]")
+    return "\n".join(lines)
+
+
+def _format_file_code_result(result: dict) -> str:
+    """Format file code content as compact text for LLM consumption."""
+
+    if "error" in result:
+        return f"[file: {result['use_path']} | error: {result['error']}]"
+    if not result.get("content"):
+        return f"[file: {result['resolved_path']} | empty | {result['total_lines']} total lines]"
+    header = (
+        f"[file: {result['resolved_path']} | lines {result['start_line']}-{result['end_line']}"
+        f" of {result['total_lines']}]"
+    )
+    parts = [header, result["content"]]
+    if result["has_more"]:
+        parts.append(f"[next_start_line: {result['next_start_line']}]")
+    return "\n".join(parts)
+
+
+def _format_reference_graph_result(result: dict) -> str:
+    """Format reference graph as compact text for LLM consumption."""
+
+    if "error" in result:
+        return f"[ref_graph: error | {result['error']}]"
+
+    resolved = result.get("resolved_subject")
+    if resolved is None:
+        return f"[ref_graph: {result['type']} | {result['input_subject']} | not found]"
+
+    lines = [f"[ref_graph: {result['type']} | {result['input_subject']} -> {resolved['subject_path']}]"]
+    for direction in ("outgoing", "incoming"):
+        edges = result.get(direction, [])
+        if not edges:
+            continue
+        lines.append(f"{direction}:")
+        for edge in edges:
+            parts = [f"  {edge['edge_type']} {edge['related_subject_path']} ({edge['related_subject_type']})"]
+            if edge.get("line") is not None:
+                loc = f"L{edge['line']}"
+                if edge.get("column") is not None:
+                    loc += f":{edge['column']}"
+                parts.append(loc)
+            sym = edge.get("related_symbol_qualname") or edge.get("related_symbol_name")
+            if sym:
+                parts.append(f"[{sym}]")
+            lines.append(" ".join(parts))
+    if not result.get("outgoing") and not result.get("incoming"):
+        lines.append("(no references)")
+    return "\n".join(lines)
+
+
+def _extract_summary_payload(raw: str) -> dict:
+    """Extract a summary payload from tagged sections or JSON fallback."""
+
+    tagged_payload = _extract_tagged_payload(raw)
+    if tagged_payload is not None:
+        return tagged_payload
+    return _extract_json(raw)
 
 
 def _extract_tagged_payload(raw: str) -> dict | None:

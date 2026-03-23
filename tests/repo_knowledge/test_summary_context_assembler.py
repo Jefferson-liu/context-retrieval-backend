@@ -30,28 +30,9 @@ class _FakeChunkRepo:
         return [_Chunk("a"), _Chunk("b")]
 
 
-class _FakeEdgeRepo:
-    async def list_neighbors_for_file(self, *, run_id: str, subject_id: str, limit_each_direction: int):  # noqa: ANN001
-        assert run_id == "run-1"
-        assert subject_id == "subject-1"
-        assert limit_each_direction == 3
-        return [
-            {
-                "direction": "outgoing",
-                "edge_type": "imports",
-                "related_subject_path": "x.py",
-                "related_subject_type": "file",
-                "line": 1,
-                "column": 1,
-            }
-        ]
-
-
-def test_summary_context_assembler_builds_chunks_and_neighbors() -> None:
+def test_summary_context_assembler_builds_chunks() -> None:
     assembler = SummaryContextAssembler(
         chunk_repo=_FakeChunkRepo(),  # type: ignore[arg-type]
-        edge_repo=_FakeEdgeRepo(),  # type: ignore[arg-type]
-        neighbor_limit_each_direction=3,
     )
     result = asyncio.run(
         assembler.build(
@@ -62,5 +43,3 @@ def test_summary_context_assembler_builds_chunks_and_neighbors() -> None:
     )
     assert result.subject_path == "a.py"
     assert result.chunk_texts == ["a", "b"]
-    assert len(result.neighbors) == 1
-    assert result.neighbors[0].related_subject_path == "x.py"
