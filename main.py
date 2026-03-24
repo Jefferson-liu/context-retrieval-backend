@@ -12,11 +12,9 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.responses import Response
 
 from infrastructure.database import init_db
-from infrastructure.graphiti import ensure_bootstrap
 from routers.document_router import router as document_router
 from routers.thread_router import router as thread_router
 from routers.data_router import router as data_router
-from routers.search_router import router as search_router
 from routers.repo_knowledge_router import router as repo_knowledge_router
 from routers.repo_knowledge_file_summary_router import router as repo_knowledge_file_summary_router
 from routers.repo_knowledge_repo_full_summary_router import router as repo_knowledge_repo_full_summary_router
@@ -37,7 +35,6 @@ logger = logging.getLogger(__name__)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await init_db()
-    await ensure_bootstrap()
     ingestion_runner = get_repo_ingestion_runner()
     file_summary_runner = get_repo_file_summary_runner()
     repo_full_summary_runner = get_repo_full_summary_runner()
@@ -60,9 +57,9 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(
-    title="Graphiti POC API",
+    title="Context Retrieval API",
     version="0.1.0",
-    description="Minimal FastAPI setup to explore Graphiti-backed knowledge graph.",
+    description="FastAPI backend for context retrieval and repo knowledge.",
     lifespan=lifespan,
 )
 
@@ -181,7 +178,6 @@ async def health():
 app.include_router(document_router)
 app.include_router(thread_router)
 app.include_router(data_router)
-app.include_router(search_router)
 app.include_router(repo_knowledge_router)
 app.include_router(repo_knowledge_file_summary_router)
 app.include_router(repo_knowledge_repo_full_summary_router)

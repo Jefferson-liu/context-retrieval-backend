@@ -10,9 +10,6 @@ class Settings:
     """Application settings loaded from environment."""
 
     DATABASE_URL: str
-    NEO4J_URI: str | None
-    NEO4J_USER: str | None
-    NEO4J_PASSWORD: str | None
     OPENAI_API_KEY: str | None
     GEMINI_API_KEY: str | None
     ANTHROPIC_API_KEY: str | None
@@ -88,9 +85,6 @@ class Settings:
         self.DATABASE_URL = os.getenv("DATABASE_URL")
         if not self.DATABASE_URL:
             raise ValueError("DATABASE_URL is not set. Please configure it in the environment or .env file.")
-        self.NEO4J_URI = os.getenv("NEO4J_URI")
-        self.NEO4J_USER = os.getenv("NEO4J_USER")
-        self.NEO4J_PASSWORD = os.getenv("NEO4J_PASSWORD")
         self.OPENAI_API_KEY = os.getenv("PERSONAL_OPENAI_KEY")
         self.ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
         self.GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
@@ -101,7 +95,6 @@ class Settings:
             .lower()
             not in {"0", "false", "no"}
         )
-        # Defaults are underscore/dash safe for Graphiti group_ids.
         self.DEFAULT_TENANT_ID = os.getenv("DEFAULT_TENANT_ID", "demo_tenant")
         self.DEFAULT_USER_ID = os.getenv("DEFAULT_USER_ID", "demo_user")
         self.SEMAPHORE_LIMIT = int(os.getenv("SEMAPHORE_LIMIT", "10"))

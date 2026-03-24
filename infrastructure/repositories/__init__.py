@@ -1,6 +1,5 @@
 from .data_repository import DataRepository
 from .chunk_repository import ChunkRepository
-from .graphiti_episode_repository import GraphitiEpisodeRepository
 from .repo_run_repository import RepoRunRepository
 from .repo_subject_repository import RepoSubjectRepository
 from .repo_snapshot_repository import RepoSnapshotRepository
@@ -29,7 +28,6 @@ from .repo_summary_group_repository import RepoSummaryGroupRepository
 __all__ = [
     "DataRepository",
     "ChunkRepository",
-    "GraphitiEpisodeRepository",
     "RepoRunRepository",
     "RepoSubjectRepository",
     "RepoSnapshotRepository",

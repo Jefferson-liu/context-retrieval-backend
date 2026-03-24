@@ -1,4 +1,4 @@
-from .data import DataRecord, ChunkRecord, GraphitiEpisodeRecord
+from .data import DataRecord, ChunkRecord
 from .repo_knowledge import (
     RepoRunRecord,
     RepoSubjectRecord,
@@ -33,7 +33,6 @@ RepoSummaryGroupMemberRecord = RepoManagerSegmentMemberRecord
 __all__ = [
     "DataRecord",
     "ChunkRecord",
-    "GraphitiEpisodeRecord",
     "RepoRunRecord",
     "RepoSubjectRecord",
     "RepoFileSnapshotRecord",

@@ -4,7 +4,6 @@ from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Respons
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from infrastructure.database import get_session
-from infrastructure.graphiti import get_graphiti_client
 from routers.scope import get_scope
 from schemas import DataResponse, BulkDataResponse
 from services.data_service import DataService
@@ -18,7 +17,6 @@ async def upload_document(
     scope=Depends(get_scope),
     session: AsyncSession = Depends(get_session),
 ) -> DataResponse:
-    graphiti_client = get_graphiti_client()
     try:
         raw = await file.read()
         body = raw.decode("utf-8")
@@ -33,14 +31,13 @@ async def upload_document(
         session,
         tenant_id=scope["tenant_id"],
         user_id=scope["user_id"],
-        graphiti_client=graphiti_client,
     )
     try:
         record = await service.create_record(title=title, body=body, chunking=True)
         await session.commit()
     except Exception as exc:
         await session.rollback()
-        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=f"Graphiti ingestion failed: {exc}")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Ingestion failed: {exc}")
     return DataResponse(**record)
 
 
@@ -54,7 +51,6 @@ async def upload_documents_bulk(
     if not files:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No files provided")
 
-    graphiti_client = get_graphiti_client()
     decoded_files: list[tuple[str, str]] = []
     for file in files:
         try:
@@ -71,11 +67,9 @@ async def upload_documents_bulk(
         session,
         tenant_id=scope["tenant_id"],
         user_id=scope["user_id"],
-        graphiti_client=graphiti_client,
     )
     result = await service.create_records_bulk(decoded_files, chunking=True)
 
-    # Adjust status: all success -> 201; partial -> 207; all failed -> 503 but still return error payload.
     successes = [DataResponse(**r) for r in result["successes"]]
     errors = result["errors"]
 

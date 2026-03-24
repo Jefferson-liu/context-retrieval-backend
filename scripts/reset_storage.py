@@ -4,10 +4,7 @@ import argparse
 import asyncio
 import logging
 
-from graphiti_core.utils.maintenance.graph_data_operations import clear_data
-
 from infrastructure.database import Base, engine
-from infrastructure.graphiti import get_graphiti_client
 
 logger = logging.getLogger(__name__)
 
@@ -30,34 +27,21 @@ async def reset_relational_store() -> None:
     logger.info("Relational tables dropped and recreated.")
 
 
-async def reset_graphiti() -> None:
-    """Wipe all Graphiti data and rebuild indices/constraints if supported."""
-    client = get_graphiti_client()
-    if not client:
-        logger.warning("Graphiti client unavailable; skipping graph reset.")
-        return
-    await clear_data(client.driver)
-    if hasattr(client, "build_indices_and_constraints"):
-        await client.build_indices_and_constraints()
-    logger.info("Graphiti data cleared and indices rebuilt.")
-
-
 async def run(force: bool) -> None:
-    """Entry point for resetting both stores with optional confirmation."""
+    """Entry point for resetting storage with optional confirmation."""
     if not force:
         confirmation = input(
-            "This will DROP all database tables and DELETE all Graphiti data. Continue? [y/N]: "
+            "This will DROP all database tables. Continue? [y/N]: "
         )
         if confirmation.strip().lower() not in {"y", "yes"}:
             print("Aborting reset.")
             return
     await reset_relational_store()
-    await reset_graphiti()
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Drop all SQL tables and wipe Graphiti data for a clean local environment."
+        description="Drop all SQL tables for a clean local environment."
     )
     parser.add_argument(
         "--force",

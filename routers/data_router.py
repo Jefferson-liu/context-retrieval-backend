@@ -4,7 +4,6 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from infrastructure.database import get_session
-from infrastructure.graphiti import get_graphiti_client
 from routers.scope import get_scope
 from schemas import DataListItem, DataResponse
 from services.data_service import DataService
@@ -17,12 +16,10 @@ async def list_data(
     scope=Depends(get_scope),
     session: AsyncSession = Depends(get_session),
 ) -> list[DataListItem]:
-    graphiti_client = get_graphiti_client()
     service = DataService(
         session,
         tenant_id=scope["tenant_id"],
         user_id=scope["user_id"],
-        graphiti_client=graphiti_client,
     )
     records = await service.list_records()
     return [DataListItem(**r) for r in records]
@@ -34,12 +31,10 @@ async def get_data(
     scope=Depends(get_scope),
     session: AsyncSession = Depends(get_session),
 ) -> DataResponse:
-    graphiti_client = get_graphiti_client()
     service = DataService(
         session,
         tenant_id=scope["tenant_id"],
         user_id=scope["user_id"],
-        graphiti_client=graphiti_client,
     )
     record = await service.get_record(data_id)
     if not record:
@@ -53,21 +48,12 @@ async def delete_data(
     scope=Depends(get_scope),
     session: AsyncSession = Depends(get_session),
 ):
-    graphiti_client = get_graphiti_client()
     service = DataService(
         session,
         tenant_id=scope["tenant_id"],
         user_id=scope["user_id"],
-        graphiti_client=graphiti_client,
     )
-    try:
-        deleted = await service.delete_record(data_id)
-    except Exception as exc:
-        await session.rollback()
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=f"Graphiti deletion failed: {exc}",
-        )
+    deleted = await service.delete_record(data_id)
     if not deleted:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
     await session.commit()
