@@ -790,12 +790,6 @@ class RepoManagerDiagnosticRecord(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
     __table_args__ = (
-        ForeignKeyConstraint(
-            ["repo_manager_run_id", "group_id"],
-            ["repo_manager_segments.repo_manager_run_id", "repo_manager_segments.group_id"],
-            ondelete="CASCADE",
-            name="fk_repo_manager_diagnostics_segment",
-        ),
         Index(
             "ix_repo_manager_diagnostics_run_group",
             "repo_manager_run_id",

@@ -24,7 +24,7 @@ class RepoGroupSummaryDiagnosticRepository:
     ) -> RepoGroupSummaryDiagnosticRecord:
         record = RepoGroupSummaryDiagnosticRecord(
             id=str(uuid4()),
-            group_summary_run_id=group_summary_run_id,
+            repo_manager_run_id=group_summary_run_id,
             group_id=group_id,
             severity=severity,
             message=message,

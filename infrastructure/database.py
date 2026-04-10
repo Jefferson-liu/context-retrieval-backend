@@ -141,6 +141,14 @@ async def _run_repo_knowledge_startup_migration(conn) -> None:  # noqa: ANN001
     await _add_column_if_needed(conn, table_name="repo_manager_runs", column_name="merge_raw_output", column_sql="JSON")
     await _add_column_if_needed(conn, table_name="repo_manager_segment_summaries", column_name="mermaid_diagram", column_sql="TEXT")
 
+    # Drop overly-strict composite FK on diagnostics — diagnostics can be run-level
+    # (e.g. architecture merge errors) and don't always reference a segment.
+    for fk_name in (
+        "fk_repo_manager_diagnostics_segment",
+        "fk_repo_group_summary_diagnostics_group",
+    ):
+        await _drop_constraint_if_exists(conn, table_name="repo_manager_diagnostics", constraint_name=fk_name)
+
 
 async def _table_exists(conn, *, table_name: str) -> bool:  # noqa: ANN001
     result = await conn.execute(
@@ -148,6 +156,27 @@ async def _table_exists(conn, *, table_name: str) -> bool:  # noqa: ANN001
         {"qualified_name": f"public.{table_name}"},
     )
     return result.scalar_one_or_none() is not None
+
+
+async def _drop_constraint_if_exists(conn, *, table_name: str, constraint_name: str) -> None:  # noqa: ANN001
+    if not await _table_exists(conn, table_name=table_name):
+        return
+    result = await conn.execute(
+        text(
+            """
+            SELECT 1
+            FROM information_schema.table_constraints
+            WHERE table_schema = 'public'
+              AND table_name = :table_name
+              AND constraint_name = :constraint_name
+            """
+        ),
+        {"table_name": table_name, "constraint_name": constraint_name},
+    )
+    if result.scalar_one_or_none() is None:
+        return
+    logger.info("Startup migration: dropping constraint %s on %s", constraint_name, table_name)
+    await conn.execute(text(f"ALTER TABLE {_qi(table_name)} DROP CONSTRAINT {_qi(constraint_name)}"))
 
 
 async def _column_exists(conn, *, table_name: str, column_name: str) -> bool:  # noqa: ANN001

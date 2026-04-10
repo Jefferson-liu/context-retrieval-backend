@@ -32,14 +32,14 @@ class RepoGroupSummaryRepository:
         input_hash: str,
     ) -> RepoGroupSummaryRecord:
         stmt = select(RepoGroupSummaryRecord).where(
-            RepoGroupSummaryRecord.group_summary_run_id == group_summary_run_id,
+            RepoGroupSummaryRecord.repo_manager_run_id == group_summary_run_id,
             RepoGroupSummaryRecord.group_id == group_id,
         )
         result = await self.session.execute(stmt)
         record = result.scalar_one_or_none()
         if record is None:
             record = RepoGroupSummaryRecord(
-                group_summary_run_id=group_summary_run_id,
+                repo_manager_run_id=group_summary_run_id,
                 group_id=group_id,
                 source_run_id=source_run_id,
                 source_file_summary_run_id=source_file_summary_run_id,

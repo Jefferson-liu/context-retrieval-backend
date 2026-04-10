@@ -20,15 +20,15 @@ class RepoSummaryGroupRepository:
     async def clear_for_run(self, *, group_summary_run_id: str) -> None:
         """Remove existing groups/members/summaries for a run before rebuilding."""
         await self.session.execute(
-            delete(RepoGroupSummaryRecord).where(RepoGroupSummaryRecord.group_summary_run_id == group_summary_run_id)
+            delete(RepoGroupSummaryRecord).where(RepoGroupSummaryRecord.repo_manager_run_id == group_summary_run_id)
         )
         await self.session.execute(
             delete(RepoSummaryGroupMemberRecord).where(
-                RepoSummaryGroupMemberRecord.group_summary_run_id == group_summary_run_id
+                RepoSummaryGroupMemberRecord.repo_manager_run_id == group_summary_run_id
             )
         )
         await self.session.execute(
-            delete(RepoSummaryGroupRecord).where(RepoSummaryGroupRecord.group_summary_run_id == group_summary_run_id)
+            delete(RepoSummaryGroupRecord).where(RepoSummaryGroupRecord.repo_manager_run_id == group_summary_run_id)
         )
         await self.session.flush()
 
@@ -38,7 +38,7 @@ class RepoSummaryGroupRepository:
 
         records = [
             RepoSummaryGroupRecord(
-                group_summary_run_id=row["group_summary_run_id"],
+                repo_manager_run_id=row["group_summary_run_id"],
                 group_id=row["group_id"],
                 source_run_id=row["source_run_id"],
                 source_file_summary_run_id=row["source_file_summary_run_id"],
@@ -62,7 +62,7 @@ class RepoSummaryGroupRepository:
 
         records = [
             RepoSummaryGroupMemberRecord(
-                group_summary_run_id=row["group_summary_run_id"],
+                repo_manager_run_id=row["group_summary_run_id"],
                 group_id=row["group_id"],
                 subject_id=row["subject_id"],
                 rank=row["rank"],
@@ -89,10 +89,10 @@ class RepoSummaryGroupRepository:
             select(RepoSummaryGroupRecord, RepoGroupSummaryRecord)
             .outerjoin(
                 RepoGroupSummaryRecord,
-                (RepoGroupSummaryRecord.group_summary_run_id == RepoSummaryGroupRecord.group_summary_run_id)
+                (RepoGroupSummaryRecord.repo_manager_run_id == RepoSummaryGroupRecord.repo_manager_run_id)
                 & (RepoGroupSummaryRecord.group_id == RepoSummaryGroupRecord.group_id),
             )
-            .where(RepoSummaryGroupRecord.group_summary_run_id == group_summary_run_id)
+            .where(RepoSummaryGroupRecord.repo_manager_run_id == group_summary_run_id)
             .order_by(RepoSummaryGroupRecord.group_key)
             .offset(offset)
             .limit(limit)
@@ -120,7 +120,7 @@ class RepoSummaryGroupRepository:
             select(RepoSummaryGroupMemberRecord, RepoSubjectRecord)
             .join(RepoSubjectRecord, RepoSubjectRecord.id == RepoSummaryGroupMemberRecord.subject_id)
             .where(
-                RepoSummaryGroupMemberRecord.group_summary_run_id == group_summary_run_id,
+                RepoSummaryGroupMemberRecord.repo_manager_run_id == group_summary_run_id,
                 RepoSummaryGroupMemberRecord.group_id.in_(group_ids),
             )
             .order_by(RepoSummaryGroupMemberRecord.group_id, RepoSummaryGroupMemberRecord.rank, RepoSubjectRecord.subject_path)
@@ -143,10 +143,10 @@ class RepoSummaryGroupRepository:
             select(RepoSummaryGroupRecord, RepoGroupSummaryRecord)
             .outerjoin(
                 RepoGroupSummaryRecord,
-                (RepoGroupSummaryRecord.group_summary_run_id == RepoSummaryGroupRecord.group_summary_run_id)
+                (RepoGroupSummaryRecord.repo_manager_run_id == RepoSummaryGroupRecord.repo_manager_run_id)
                 & (RepoGroupSummaryRecord.group_id == RepoSummaryGroupRecord.group_id),
             )
-            .where(RepoSummaryGroupRecord.group_summary_run_id == group_summary_run_id)
+            .where(RepoSummaryGroupRecord.repo_manager_run_id == group_summary_run_id)
             .limit(1)
         )
         if group_id:
