@@ -276,6 +276,56 @@ async def repo_read_repo_manager_segment(
 
 
 @mcp.tool(
+    description=(
+        "Return the merged architecture overview and Mermaid diagram from a repo-manager run. "
+        "If repo_manager_run_id is omitted, uses the latest completed repo-manager run."
+    )
+)
+async def repo_get_architecture(
+    run_id: str,
+    repo_manager_run_id: str | None = None,
+    tenant_id: str | None = None,
+    user_id: str | None = None,
+) -> dict:
+    resolved_tenant, resolved_user = _resolve_scope(tenant_id, user_id)
+    async with SessionLocal() as session:
+        service = RepoKnowledgeMcpService(
+            session,
+            tenant_id=resolved_tenant,
+            user_id=resolved_user,
+        )
+        return await service.get_repo_architecture(
+            run_id=run_id,
+            repo_manager_run_id=repo_manager_run_id,
+        )
+
+
+@mcp.tool(
+    description=(
+        "Return the README markdown from a repo full-summary run. "
+        "If repo_full_summary_run_id is omitted, uses the latest completed repo full-summary run."
+    )
+)
+async def repo_get_full_summary(
+    run_id: str,
+    repo_full_summary_run_id: str | None = None,
+    tenant_id: str | None = None,
+    user_id: str | None = None,
+) -> dict:
+    resolved_tenant, resolved_user = _resolve_scope(tenant_id, user_id)
+    async with SessionLocal() as session:
+        service = RepoKnowledgeMcpService(
+            session,
+            tenant_id=resolved_tenant,
+            user_id=resolved_user,
+        )
+        return await service.get_repo_full_summary(
+            run_id=run_id,
+            repo_full_summary_run_id=repo_full_summary_run_id,
+        )
+
+
+@mcp.tool(
     description="Return deterministic repository tree structure from run file snapshots."
 )
 async def repo_structure(

@@ -28,6 +28,8 @@ class Settings:
     REPO_PARSE_MAX_FILE_BYTES: int
     REPO_PARSE_LANGUAGES_LIST: list[str]
     REPO_SUMMARY_MAX_CONCURRENT_RUNS: int
+    REPO_SUMMARY_MAX_CONCURRENT_FILES: int
+    REPO_SUMMARY_MAX_ITERATIONS: int
     REPO_SUMMARY_PROMPT_VERSION: str
     REPO_SUMMARY_MODEL_PROVIDER: str
     REPO_SUMMARY_MODEL_NAME: str
@@ -123,6 +125,8 @@ class Settings:
             os.getenv("REPO_PARSE_LANGUAGES", "python,typescript,javascript")
         )
         self.REPO_SUMMARY_MAX_CONCURRENT_RUNS = int(os.getenv("REPO_SUMMARY_MAX_CONCURRENT_RUNS", "1"))
+        self.REPO_SUMMARY_MAX_CONCURRENT_FILES = int(os.getenv("REPO_SUMMARY_MAX_CONCURRENT_FILES", "8"))
+        self.REPO_SUMMARY_MAX_ITERATIONS = int(os.getenv("REPO_SUMMARY_MAX_ITERATIONS", "6"))
         self.REPO_SUMMARY_PROMPT_VERSION = os.getenv("REPO_SUMMARY_PROMPT_VERSION", "v1")
         self.REPO_SUMMARY_MODEL_PROVIDER = os.getenv("REPO_SUMMARY_MODEL_PROVIDER", "gemini").lower()
         self.REPO_SUMMARY_MODEL_NAME = os.getenv(

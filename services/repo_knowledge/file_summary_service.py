@@ -269,6 +269,7 @@ class FileSummaryAgentConfig:
     retry_count: int = 2
     timeout_seconds: int = 60
     max_iterations: int = 6
+    max_concurrent_files: int = 8
 
     @classmethod
     def from_settings(cls) -> "FileSummaryAgentConfig":
@@ -279,6 +280,8 @@ class FileSummaryAgentConfig:
             map_chunk_chars=settings.REPO_SUMMARY_MAP_CHUNK_CHARS,
             retry_count=settings.REPO_SUMMARY_RETRY_COUNT,
             timeout_seconds=settings.REPO_SUMMARY_TIMEOUT_SECONDS,
+            max_iterations=settings.REPO_SUMMARY_MAX_ITERATIONS,
+            max_concurrent_files=settings.REPO_SUMMARY_MAX_CONCURRENT_FILES,
         )
 
 
@@ -370,86 +373,139 @@ class RepoFileSummaryWorker:
             )
             await self.session.commit()
 
-            for snapshot, subject in files:
-                try:
-                    context = await assembler.build(
-                        source_run_id=run.source_run_id,
-                        snapshot=snapshot,
-                        subject=subject,
-                        repo_path=source_run.source_locator,
-                        repo_address=source_run.repo_address,
-                        tech_stack=subject.language or "unknown",
-                    )
-                    result = await summarizer.summarize(payload=context)
-                    await self.summary_repo.upsert(
-                        file_summary_run_id=run.id,
-                        source_run_id=run.source_run_id,
-                        subject_id=subject.id,
-                        overall_summary=result.output.overall_summary,
-                        file_cluster=result.output.file_cluster,
-                        important_relationships=result.output.important_relationships,
-                        group_function=result.output.group_function,
-                        raw_output=result.raw_output,
-                        input_hash=result.input_hash,
-                    )
-                    if result.usage_trace is not None:
-                        trace = result.usage_trace
-                        await self.usage_repo.create(
-                            file_summary_run_id=run.id,
-                            subject_id=subject.id,
-                            model_provider=run.model_provider,
-                            model_name=run.model_name,
-                            status="completed",
-                            total_input_tokens=trace.get("total_input_tokens", 0),
-                            total_output_tokens=trace.get("total_output_tokens", 0),
-                            total_tokens=trace.get("total_tokens", 0),
-                            cached_input_tokens=trace.get("cached_input_tokens", 0),
-                            reasoning_tokens=trace.get("reasoning_tokens", 0),
-                            llm_step_count=trace.get("llm_step_count", 0),
-                            tool_call_count=trace.get("tool_call_count", 0),
-                            duration_ms=trace.get("duration_ms"),
-                            steps=trace.get("steps", []),
-                        )
-                    else:
-                        await self.usage_repo.create(
-                            file_summary_run_id=run.id,
-                            subject_id=subject.id,
-                            model_provider=run.model_provider,
-                            model_name=run.model_name,
-                            status="skipped",
-                        )
-                    counters.files_summarized += 1
-                except Exception as exc:  # pragma: no cover - runtime LLM failures
-                    counters.files_failed += 1
-                    diagnostic_code, diagnostic_message = _classify_file_summary_failure(exc)
-                    await self.summary_diagnostic_repo.create(
-                        file_summary_run_id=run.id,
-                        subject_id=subject.id,
-                        severity="error",
-                        message=diagnostic_message,
-                        details={
-                            "error": str(exc),
-                            "subject_path": subject.subject_path,
-                            "error_type": exc.__class__.__name__,
-                            "diagnostic_code": diagnostic_code,
-                        },
-                    )
-                    await self.usage_repo.create(
-                        file_summary_run_id=run.id,
-                        subject_id=subject.id,
-                        model_provider=run.model_provider,
-                        model_name=run.model_name,
-                        status="failed",
-                        error_message=str(exc)[:2000],
-                    )
+            semaphore = asyncio.Semaphore(cfg.max_concurrent_files)
+            lock = asyncio.Lock()
 
-                await self.file_summary_run_repo.set_counts(
-                    run,
-                    files_seen=counters.files_seen,
-                    files_summarized=counters.files_summarized,
-                    files_failed=counters.files_failed,
-                )
-                await self.session.commit()
+            async def _process_file(snapshot, subject) -> None:
+                async with semaphore:
+                    # --- read stage: build context from DB (serialized via lock) ---
+                    async with lock:
+                        try:
+                            context = await assembler.build(
+                                source_run_id=run.source_run_id,
+                                snapshot=snapshot,
+                                subject=subject,
+                                repo_path=source_run.source_locator,
+                                repo_address=source_run.repo_address,
+                                tech_stack=subject.language or "unknown",
+                            )
+                        except Exception as exc:  # pragma: no cover - runtime failures
+                            counters.files_failed += 1
+                            diagnostic_code, diagnostic_message = _classify_file_summary_failure(exc)
+                            await self.summary_diagnostic_repo.create(
+                                file_summary_run_id=run.id,
+                                subject_id=subject.id,
+                                severity="error",
+                                message=diagnostic_message,
+                                details={
+                                    "error": str(exc),
+                                    "subject_path": subject.subject_path,
+                                    "error_type": exc.__class__.__name__,
+                                    "diagnostic_code": diagnostic_code,
+                                },
+                            )
+                            await self.usage_repo.create(
+                                file_summary_run_id=run.id,
+                                subject_id=subject.id,
+                                model_provider=run.model_provider,
+                                model_name=run.model_name,
+                                status="failed",
+                                error_message=str(exc)[:2000],
+                            )
+                            await self.file_summary_run_repo.set_counts(
+                                run,
+                                files_seen=counters.files_seen,
+                                files_summarized=counters.files_summarized,
+                                files_failed=counters.files_failed,
+                            )
+                            await self.session.commit()
+                            return
+
+                    # --- LLM stage: summarize (runs concurrently, no lock) ---
+                    try:
+                        result = await summarizer.summarize(payload=context)
+                    except Exception as exc:  # pragma: no cover - runtime LLM failures
+                        async with lock:
+                            counters.files_failed += 1
+                            diagnostic_code, diagnostic_message = _classify_file_summary_failure(exc)
+                            await self.summary_diagnostic_repo.create(
+                                file_summary_run_id=run.id,
+                                subject_id=subject.id,
+                                severity="error",
+                                message=diagnostic_message,
+                                details={
+                                    "error": str(exc),
+                                    "subject_path": subject.subject_path,
+                                    "error_type": exc.__class__.__name__,
+                                    "diagnostic_code": diagnostic_code,
+                                },
+                            )
+                            await self.usage_repo.create(
+                                file_summary_run_id=run.id,
+                                subject_id=subject.id,
+                                model_provider=run.model_provider,
+                                model_name=run.model_name,
+                                status="failed",
+                                error_message=str(exc)[:2000],
+                            )
+                            await self.file_summary_run_repo.set_counts(
+                                run,
+                                files_seen=counters.files_seen,
+                                files_summarized=counters.files_summarized,
+                                files_failed=counters.files_failed,
+                            )
+                            await self.session.commit()
+                        return
+
+                    # --- write stage: persist results (serialized via lock) ---
+                    async with lock:
+                        await self.summary_repo.upsert(
+                            file_summary_run_id=run.id,
+                            source_run_id=run.source_run_id,
+                            subject_id=subject.id,
+                            overall_summary=result.output.overall_summary,
+                            file_cluster=result.output.file_cluster,
+                            important_relationships=result.output.important_relationships,
+                            group_function=result.output.group_function,
+                            raw_output=result.raw_output,
+                            input_hash=result.input_hash,
+                        )
+                        if result.usage_trace is not None:
+                            trace = result.usage_trace
+                            await self.usage_repo.create(
+                                file_summary_run_id=run.id,
+                                subject_id=subject.id,
+                                model_provider=run.model_provider,
+                                model_name=run.model_name,
+                                status="completed",
+                                total_input_tokens=trace.get("total_input_tokens", 0),
+                                total_output_tokens=trace.get("total_output_tokens", 0),
+                                total_tokens=trace.get("total_tokens", 0),
+                                cached_input_tokens=trace.get("cached_input_tokens", 0),
+                                reasoning_tokens=trace.get("reasoning_tokens", 0),
+                                llm_step_count=trace.get("llm_step_count", 0),
+                                tool_call_count=trace.get("tool_call_count", 0),
+                                duration_ms=trace.get("duration_ms"),
+                                steps=trace.get("steps", []),
+                            )
+                        else:
+                            await self.usage_repo.create(
+                                file_summary_run_id=run.id,
+                                subject_id=subject.id,
+                                model_provider=run.model_provider,
+                                model_name=run.model_name,
+                                status="skipped",
+                            )
+                        counters.files_summarized += 1
+                        await self.file_summary_run_repo.set_counts(
+                            run,
+                            files_seen=counters.files_seen,
+                            files_summarized=counters.files_summarized,
+                            files_failed=counters.files_failed,
+                        )
+                        await self.session.commit()
+
+            await asyncio.gather(*[_process_file(snapshot, subject) for snapshot, subject in files])
 
             if counters.files_seen > 0 and counters.files_summarized == 0:
                 await self.file_summary_run_repo.mark_failed(

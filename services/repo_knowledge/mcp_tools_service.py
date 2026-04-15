@@ -5,6 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from infrastructure.models import (
     RepoEmbeddingRunRecord,
     RepoFileSummaryRunRecord,
+    RepoFullSummaryRunRecord,
     RepoGroupSummaryRunRecord,
     RepoRunRecord,
 )
@@ -13,6 +14,8 @@ from infrastructure.repositories import (
     RepoEmbeddingRepository,
     RepoEmbeddingRunRepository,
     RepoFileSummaryRunRepository,
+    RepoFullSummaryRepository,
+    RepoFullSummaryRunRepository,
     RepoGroupSummaryRunRepository,
     RepoRunRepository,
     RepoSnapshotRepository,
@@ -41,6 +44,8 @@ class RepoKnowledgeMcpService:
         self.embedding_repo = RepoEmbeddingRepository(session)
         self.group_summary_run_repo = RepoGroupSummaryRunRepository(session)
         self.summary_group_repo = RepoSummaryGroupRepository(session)
+        self.full_summary_run_repo = RepoFullSummaryRunRepository(session)
+        self.full_summary_repo = RepoFullSummaryRepository(session)
 
     async def get_run_overview(self, *, run_id: str) -> dict:
         """Return one scoped run plus latest file_summary/embedding/repo-manager metadata."""
@@ -440,6 +445,72 @@ class RepoKnowledgeMcpService:
                 "updated_at": summary.updated_at.isoformat() if summary and summary.updated_at else None,
                 "members": members,
             },
+        }
+
+    async def get_repo_architecture(
+        self,
+        *,
+        run_id: str,
+        repo_manager_run_id: str | None,
+    ) -> dict:
+        """Return architecture overview and merged Mermaid diagram from a repo-manager run."""
+        run = await self._get_scoped_run(run_id)
+        summary_run = await self._resolve_repo_manager_run(
+            run=run,
+            repo_manager_run_id=repo_manager_run_id,
+        )
+        if summary_run is None:
+            raise RepoKnowledgeMcpServiceError("No completed repo-manager run found for run_id")
+        if not summary_run.architecture_overview and not summary_run.merged_mermaid_diagram:
+            raise RepoKnowledgeMcpServiceError(
+                "Repo-manager run has no architecture artifact yet — the merge phase may not have completed"
+            )
+        return {
+            "run_id": run.id,
+            "repo_manager_run_id": summary_run.id,
+            "architecture_overview": summary_run.architecture_overview,
+            "merged_mermaid_diagram": summary_run.merged_mermaid_diagram,
+            "finished_at": summary_run.finished_at.isoformat() if summary_run.finished_at else None,
+        }
+
+    async def get_repo_full_summary(
+        self,
+        *,
+        run_id: str,
+        repo_full_summary_run_id: str | None,
+    ) -> dict:
+        """Return the README markdown from a repo full-summary run."""
+        run = await self._get_scoped_run(run_id)
+
+        if repo_full_summary_run_id:
+            full_summary_run = await self.full_summary_run_repo.get_scoped(
+                repo_full_summary_run_id,
+                tenant_id=self.tenant_id,
+                user_id=self.user_id,
+            )
+            if full_summary_run is None:
+                raise RepoKnowledgeMcpServiceError("Repo full-summary run not found")
+            if full_summary_run.source_run_id != run.id:
+                raise RepoKnowledgeMcpServiceError("Repo full-summary run does not belong to run_id")
+        else:
+            full_summary_run = await self.full_summary_run_repo.latest_completed_for_source(
+                source_run_id=run.id,
+                tenant_id=self.tenant_id,
+                user_id=self.user_id,
+            )
+        if full_summary_run is None:
+            raise RepoKnowledgeMcpServiceError("No completed repo full-summary run found for run_id")
+
+        artifact = await self.full_summary_repo.get_for_run(
+            repo_full_summary_run_id=full_summary_run.id,
+        )
+        if artifact is None:
+            raise RepoKnowledgeMcpServiceError("Repo full-summary artifact not found")
+        return {
+            "run_id": run.id,
+            "repo_full_summary_run_id": full_summary_run.id,
+            "readme_markdown": artifact.readme_markdown,
+            "finished_at": full_summary_run.finished_at.isoformat() if full_summary_run.finished_at else None,
         }
 
     async def get_repo_structure(
