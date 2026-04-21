@@ -26,7 +26,7 @@ from services.repo_knowledge.mcp_tools_service import (
 
 mcp = FastMCP(
     name="repo-knowledge-mcp",
-    port=8001,
+    port=int(os.getenv("MCP_PORT", "8001")),
     instructions=(
         "Read-only MCP server exposing knowledge about a codebase. "
         "Use these tools to orient yourself in an unfamiliar repo: start with overview or architecture, "
