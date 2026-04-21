@@ -1,9 +1,10 @@
 from __future__ import annotations
 
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from contextlib import asynccontextmanager
 import json
 import logging
+from typing import Any
 
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
@@ -186,12 +187,16 @@ app.include_router(repo_knowledge_repo_manager_router)
 app.include_router(repo_knowledge_pipeline_router)
 
 
-def _serialize_validation_errors(errors: list[dict]) -> list[dict]:
+def _serialize_validation_errors(errors: Sequence[Any]) -> list[dict[str, Any]]:
     """Return JSON-safe validation errors for custom exception responses."""
 
-    serialized: list[dict] = []
+    serialized: list[dict[str, Any]] = []
     for error in errors:
-        item = dict(error)
+        if isinstance(error, Mapping):
+            item: dict[str, Any] = dict(error)
+        else:
+            item = {"detail": str(error)}
+
         ctx = item.get("ctx")
         if isinstance(ctx, dict):
             item["ctx"] = {

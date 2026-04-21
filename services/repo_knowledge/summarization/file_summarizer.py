@@ -17,6 +17,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from services.repo_knowledge.path_input_normalization import coerce_local_source_path
 from services.repo_knowledge.prompt_loader import load_prompt, render_prompt
 from services.repo_knowledge.summarization.react_agent_runtime import (
+    AgentProtocolError,
     extract_full_trace_from_state,
     invoke_react_agent,
     log_react_agent_dependency_versions,
@@ -620,12 +621,18 @@ class RepoFileSummarizer:
             output = SummaryOutput.model_validate(_extract_summary_payload(agent_result.raw_text))
             return output, agent_result.raw_text, {"message_count": _message_count(agent_result.state)}, usage_trace
         except Exception as exc:
-            if not _is_recursion_limit_error(exc):
+            if isinstance(exc, AgentProtocolError) and exc.code == "thought_signature_missing":
+                logger.warning(
+                    "Gemini thought_signature error for %s — falling back to direct synthesis",
+                    payload.subject_path,
+                )
+            elif _is_recursion_limit_error(exc):
+                logger.warning(
+                    "Agent hit recursion limit for %s — falling back to direct synthesis",
+                    payload.subject_path,
+                )
+            else:
                 raise
-            logger.warning(
-                "Agent hit recursion limit for %s — falling back to direct synthesis",
-                payload.subject_path,
-            )
 
         # Phase 2: forced synthesis without tools
         raw_text, usage_trace = await self._synthesize_without_tools(user_prompt)

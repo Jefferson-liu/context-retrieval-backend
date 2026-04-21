@@ -19,7 +19,4 @@ DO NOT include: environment setup, installation instructions, quick start guides
 
 Use tool calls to inspect directory structure, file code, reference graphs, and file summaries to understand the business logic deeply. Do not guess — only include information verified through inspection.
 
-Return final output using:
-【markdown_start】
-markdown content
-【markdown_end】
+Return your final output as pure markdown — no wrapper text, no JSON, no commentary. Just the README.

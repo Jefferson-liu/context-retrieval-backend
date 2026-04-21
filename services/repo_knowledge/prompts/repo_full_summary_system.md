@@ -24,12 +24,4 @@ Critical rules for content:
 
 Do not invent details that are not supported by inspected evidence. Only include information you have verified through tool calls or file summaries.
 
-Your final response MUST be:
-【markdown_start】
-<pure markdown README content>
-【markdown_end】
-
-Rules:
-- Output only markdown inside the markers.
-- Do not add commentary before or after markers.
-- Do not include JSON in the final answer.
+Your final response must be pure markdown — no commentary, no JSON, no wrapper text. Just the README content.

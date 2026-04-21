@@ -8,7 +8,6 @@ import pytest
 from services.repo_knowledge.repo_full_summarization.repo_full_summarizer import (
     RepoFullSummaryAgentTools,
     RepoFullSummarizer,
-    _extract_readme_payload,
 )
 from services.repo_knowledge.repo_full_summarization.types import RepoFullSummaryInput
 from services.repo_knowledge.summarization.react_agent_runtime import (
@@ -123,17 +122,10 @@ def test_return_file_summary_is_scoped_to_file_summary_run() -> None:
     assert result["overall_summary"] == "B"
 
 
-def test_extract_readme_payload_accepts_marker_wrapped_output() -> None:
-    payload = _extract_readme_payload(
-        "prefix\n【markdown_start】\n# Title\nSome content\n【markdown_end】\nsuffix"
-    )
-    assert payload["readme_markdown"].startswith("# Title")
-
-
-def test_repo_full_summarizer_parses_marker_wrapped_output(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_repo_full_summarizer_stores_raw_text(monkeypatch: pytest.MonkeyPatch) -> None:
     async def _fake_invoke(**_kwargs):  # noqa: ANN003
         return ReActAgentResult(
-            raw_text="【markdown_start】\n# Repo\nBody\n【markdown_end】",
+            raw_text="# Repo\nBody",
             state={"messages": [1, 2]},
         )
 
@@ -167,46 +159,13 @@ def test_repo_full_summarizer_parses_marker_wrapped_output(monkeypatch: pytest.M
     assert result.raw_output["agent"]["message_count"] == 2
 
 
-def test_repo_full_summarizer_malformed_output_raises(monkeypatch: pytest.MonkeyPatch) -> None:
-    async def _fake_invoke(**_kwargs):  # noqa: ANN003
-        return ReActAgentResult(raw_text="missing markers", state={"messages": []})
-
-    monkeypatch.setattr(
-        "services.repo_knowledge.repo_full_summarization.repo_full_summarizer.invoke_react_agent",
-        _fake_invoke,
-    )
-    summarizer = RepoFullSummarizer(
-        chat_model=object(),  # type: ignore[arg-type]
-        prompt_version="v1",
-        max_input_chars=6000,
-        retry_count=1,
-        timeout_seconds=20,
-        subject_repo=None,
-        edge_repo=None,
-        file_summary_repo=_FakeFileSummaryRepo(),  # type: ignore[arg-type]
-        max_iterations=4,
-    )
-    with pytest.raises(Exception):
-        asyncio.run(
-            summarizer.summarize(
-                payload=RepoFullSummaryInput(
-                    source_run_id="run-1",
-                    source_file_summary_run_id="file-run-a",
-                    repo_path="/tmp/repo",
-                    repo_address="repo-address",
-                    tech_stack="python",
-                )
-            )
-        )
-
-
 def test_repo_full_summarizer_react_executes_tool(monkeypatch: pytest.MonkeyPatch) -> None:
     async def _fake_invoke(**kwargs):  # noqa: ANN003
         tools = kwargs["tools"]
         tool_map = {tool.name: tool for tool in tools}
         await tool_map["return_file_summary"].ainvoke({"file_name": "src/a.py"})
         return ReActAgentResult(
-            raw_text="【markdown_start】\n# Repo\nBody\n【markdown_end】",
+            raw_text="# Repo\nBody",
             state={"messages": [1]},
         )
 

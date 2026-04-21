@@ -12,7 +12,7 @@ from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
 from langchain_core.tools import BaseTool
 
 try:
-    from langchain.agents import create_agent
+    from langgraph.prebuilt import create_react_agent as create_agent
 except Exception:  # pragma: no cover - optional dependency in constrained envs
     create_agent = None
 
@@ -62,8 +62,7 @@ async def invoke_react_agent(
     if not hasattr(chat_model, "bind_tools"):
         raise RuntimeError("Configured chat model does not support tool binding")
 
-    bound_model = chat_model.bind_tools(tools)
-    agent = create_agent(bound_model, tools)
+    agent = create_agent(chat_model, tools)
     recursion_limit = max(10, max_iterations * 3)
 
     try:

@@ -7,7 +7,7 @@ from hashlib import sha256
 from typing import TYPE_CHECKING, Any
 
 from langchain_core.language_models.chat_models import BaseChatModel
-from langchain_core.tools import StructuredTool
+from langchain_core.tools import BaseTool, StructuredTool
 from pydantic import BaseModel, ConfigDict, Field
 
 from services.repo_knowledge.prompt_loader import load_prompt, render_prompt
@@ -117,7 +117,7 @@ class RepoFullSummaryAgentTools:
         )
         self._summary_index: dict[str, dict[str, Any]] | None = None
 
-    def as_langchain_tools(self) -> list[StructuredTool]:
+    def as_langchain_tools(self) -> list[BaseTool]:
         """Build LangChain tool objects with exact prompt-compatible names."""
 
         return [
@@ -409,7 +409,12 @@ class RepoFullSummarizer:
             timeout_seconds=self.timeout_seconds,
             max_iterations=self.max_iterations,
         )
-        output = RepoFullSummaryOutput.model_validate(_extract_readme_payload(agent_result.raw_text))
+        logger.info(
+            "repo_full_summary raw agent output (%d chars):\n%s",
+            len(agent_result.raw_text),
+            agent_result.raw_text[:4000],
+        )
+        output = RepoFullSummaryOutput(readme_markdown=agent_result.raw_text.strip())
         return output, agent_result.raw_text, {"message_count": _message_count(agent_result.state)}
 
 
@@ -455,38 +460,6 @@ def _record_tool_trace(
     if isinstance(resolved_subject_path, str):
         trace_item["resolved_subject_path"] = resolved_subject_path
     trace_sink.append(trace_item)
-
-
-def _extract_readme_payload(raw: str) -> dict[str, str]:
-    readme = _extract_between_markers(
-        raw,
-        start_marker="【markdown_start】",
-        end_marker="【markdown_end】",
-    )
-    if readme is None:
-        # Tolerate ASCII fallback markers for occasional model variance.
-        readme = _extract_between_markers(
-            raw,
-            start_marker="[markdown_start]",
-            end_marker="[markdown_end]",
-        )
-    if readme is None:
-        raise ValueError("Model output missing markdown_start/markdown_end markers")
-    markdown = readme.strip()
-    if not markdown:
-        raise ValueError("README markdown output is empty")
-    return {"readme_markdown": markdown}
-
-
-def _extract_between_markers(raw: str, *, start_marker: str, end_marker: str) -> str | None:
-    start = raw.find(start_marker)
-    if start < 0:
-        return None
-    content_start = start + len(start_marker)
-    end = raw.find(end_marker, content_start)
-    if end < 0 or end <= content_start:
-        return None
-    return raw[content_start:end]
 
 
 def _truncate_text(value: str, max_chars: int) -> str:

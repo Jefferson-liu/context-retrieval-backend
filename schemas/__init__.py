@@ -71,9 +71,11 @@ from .repo_knowledge_repo_manager import (
     RepoLatestRepoManagerResponse,
 )
 from .repo_knowledge_pipeline import (
+    PipelineStageProgress,
     RepoPipelineRunCreateRequest,
     RepoPipelineRunCreateResponse,
     RepoPipelineRunStatusResponse,
+    RepoPipelineRunListResponse,
 )
 
 __all__ = [
@@ -136,7 +138,9 @@ __all__ = [
     "RepoManagerSegmentListResponse",
     "RepoArchitectureResponse",
     "RepoLatestRepoManagerResponse",
+    "PipelineStageProgress",
     "RepoPipelineRunCreateRequest",
     "RepoPipelineRunCreateResponse",
     "RepoPipelineRunStatusResponse",
+    "RepoPipelineRunListResponse",
 ]

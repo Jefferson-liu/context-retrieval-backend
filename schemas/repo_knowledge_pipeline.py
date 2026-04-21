@@ -21,6 +21,14 @@ PipelineStage = Literal[
 ]
 
 
+class PipelineStageProgress(BaseModel):
+    """Per-stage progress counts for the currently active pipeline stage."""
+
+    items_total: int = 0
+    items_completed: int = 0
+    items_failed: int = 0
+
+
 class RepoPipelineRunCreateRequest(BaseModel):
     """Request payload for starting a full repo-knowledge pipeline from a source path."""
 
@@ -74,6 +82,17 @@ class RepoPipelineRunStatusResponse(BaseModel):
     repo_manager_run_status: str | None = None
     error_message: str | None = None
     stage_error_message: str | None = None
+    files_seen: int = 0
+    files_ingested: int = 0
+    stage_progress: PipelineStageProgress | None = None
     queued_at: datetime
     started_at: datetime | None = None
     finished_at: datetime | None = None
+
+
+class RepoPipelineRunListResponse(BaseModel):
+    """Paginated list of pipeline runs with full stage status."""
+
+    items: list[RepoPipelineRunStatusResponse] = Field(default_factory=list)
+    limit: int
+    offset: int

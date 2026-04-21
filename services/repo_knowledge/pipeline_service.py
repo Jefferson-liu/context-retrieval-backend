@@ -147,6 +147,57 @@ class RepoKnowledgePipelineService:
         )
         return source_run, queue_item
 
+    async def list_pipeline_statuses(
+        self,
+        *,
+        limit: int,
+        offset: int,
+        status: str | None = None,
+    ) -> list[RepoPipelineStatusSnapshot]:
+        """List all source runs with resolved pipeline status for each."""
+
+        runs = await self.run_repo.list_scoped(
+            tenant_id=self.tenant_id,
+            user_id=self.user_id,
+            limit=limit,
+            offset=offset,
+            status=status,
+        )
+        snapshots: list[RepoPipelineStatusSnapshot] = []
+        for source_run in runs:
+            file_summary_run = await self._pick_file_summary_run(source_run_id=source_run.id)
+            repo_full_summary_run = await self._pick_repo_full_summary_run(
+                source_run_id=source_run.id,
+                source_file_summary_run_id=file_summary_run.id if file_summary_run else None,
+            )
+            embedding_run = await self._pick_embedding_run(
+                source_run_id=source_run.id,
+                source_file_summary_run_id=file_summary_run.id if file_summary_run else None,
+            )
+            repo_manager_run = await self._pick_repo_manager_run(
+                source_run_id=source_run.id,
+                source_file_summary_run_id=file_summary_run.id if file_summary_run else None,
+            )
+            pipeline_status, stage, error_message, stage_error_message = _resolve_pipeline_status(
+                source_run=source_run,
+                file_summary_run=file_summary_run,
+                repo_full_summary_run=repo_full_summary_run,
+                embedding_run=embedding_run,
+                repo_manager_run=repo_manager_run,
+            )
+            snapshots.append(RepoPipelineStatusSnapshot(
+                source_run=source_run,
+                status=pipeline_status,
+                stage=stage,
+                file_summary_run=file_summary_run,
+                repo_full_summary_run=repo_full_summary_run,
+                embedding_run=embedding_run,
+                repo_manager_run=repo_manager_run,
+                error_message=error_message,
+                stage_error_message=stage_error_message,
+            ))
+        return snapshots
+
     async def get_pipeline_status(self, *, source_run_id: str) -> RepoPipelineStatusSnapshot | None:
         """Resolve end-to-end stage status for one source run id."""
 

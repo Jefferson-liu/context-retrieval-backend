@@ -154,6 +154,20 @@ class RepoRunRepository:
         run.edge_count_symbol = edge_count_symbol
         await self.session.flush()
 
+    async def latest_completed_scoped(self, *, tenant_id: str, user_id: str) -> RepoRunRecord | None:
+        stmt = (
+            select(RepoRunRecord)
+            .where(
+                RepoRunRecord.tenant_id == tenant_id,
+                RepoRunRecord.user_id == user_id,
+                RepoRunRecord.status == "completed",
+            )
+            .order_by(desc(RepoRunRecord.finished_at), desc(RepoRunRecord.id))
+            .limit(1)
+        )
+        result = await self.session.execute(stmt)
+        return result.scalar_one_or_none()
+
     async def find_completed_by_fingerprint(
         self,
         *,

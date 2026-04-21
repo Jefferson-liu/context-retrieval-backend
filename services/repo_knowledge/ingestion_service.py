@@ -90,13 +90,18 @@ class RepoKnowledgeService:
         )
 
         if payload.source_type == "git_url":
-            logger.warning("Create repo run rejected source_type=git_url not implemented")
-            raise NotImplementedError("source_type=git_url is not implemented yet")
+            source_locator = payload.source_path.strip()
+            if not (source_locator.startswith("https://") or source_locator.startswith("git@")):
+                raise RepoIngestionError("git_url source_path must start with https:// or git@")
+            repo_address = payload.repo_address or _derive_repo_address_from_url(source_locator)
+        else:
+            validated_path = _validate_local_source_path(
+                source_path=payload.source_path,
+                allowed_roots=settings.REPO_INGEST_ALLOWED_ROOTS_LIST,
+            )
+            source_locator = str(validated_path)
+            repo_address = payload.repo_address or source_locator
 
-        source_path = _validate_local_source_path(
-            source_path=payload.source_path,
-            allowed_roots=settings.REPO_INGEST_ALLOWED_ROOTS_LIST,
-        )
         include_extensions = _normalize_extensions(
             payload.include_extensions or settings.REPO_INGEST_ALLOWED_EXTENSIONS_LIST
         )
@@ -110,8 +115,8 @@ class RepoKnowledgeService:
             tenant_id=self.tenant_id,
             user_id=self.user_id,
             source_type=payload.source_type,
-            source_locator=str(source_path),
-            repo_address=payload.repo_address or str(source_path),
+            source_locator=source_locator,
+            repo_address=repo_address,
             include_extensions=",".join(sorted(include_extensions)),
             exclude_globs="\n".join(exclude_globs),
         )
@@ -545,7 +550,12 @@ class RepoIngestionWorker:
             )
         if run.source_type == "git_url":
             logger.debug("Repo ingestion using GitCloneSourceAdapter run_id=%s", run.id)
-            return GitCloneSourceAdapter(source_path=run.source_locator)
+            return GitCloneSourceAdapter(
+                source_path=run.source_locator,
+                include_extensions=include_extensions,
+                excluded_dirs=excluded_dirs,
+                exclude_globs=exclude_globs,
+            )
         raise RepoIngestionError(f"Unsupported source_type: {run.source_type}")
 
     async def _persist_parse_graph(
@@ -900,6 +910,21 @@ def _dedupe_edge_rows(edge_rows: list[dict]) -> list[dict]:
         unique_rows.append(edge)
 
     return unique_rows
+
+
+def _derive_repo_address_from_url(url: str) -> str:
+    """Derive a repo address from a git URL (e.g. 'https://github.com/user/repo' → 'github.com/user/repo')."""
+    cleaned = url.strip().rstrip("/")
+    if cleaned.endswith(".git"):
+        cleaned = cleaned[:-4]
+    if cleaned.startswith("https://"):
+        return cleaned[len("https://"):]
+    if cleaned.startswith("http://"):
+        return cleaned[len("http://"):]
+    if cleaned.startswith("git@"):
+        # git@github.com:user/repo → github.com/user/repo
+        return cleaned[len("git@"):].replace(":", "/", 1)
+    return cleaned
 
 
 def _validate_local_source_path(*, source_path: str, allowed_roots: list[str]) -> Path:

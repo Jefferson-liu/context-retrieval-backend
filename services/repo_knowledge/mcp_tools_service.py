@@ -160,7 +160,7 @@ class RepoKnowledgeMcpService:
     async def list_summaries(
         self,
         *,
-        run_id: str,
+        run_id: str | None = None,
         file_summary_run_id: str | None,
         limit: int,
         offset: int,
@@ -216,7 +216,7 @@ class RepoKnowledgeMcpService:
     async def read_summary_file(
         self,
         *,
-        run_id: str,
+        run_id: str | None = None,
         subject_path: str,
         file_summary_run_id: str | None,
     ) -> dict:
@@ -300,7 +300,7 @@ class RepoKnowledgeMcpService:
     async def list_repo_manager_segments(
         self,
         *,
-        run_id: str,
+        run_id: str | None = None,
         repo_manager_run_id: str | None,
         limit: int,
         offset: int,
@@ -383,7 +383,7 @@ class RepoKnowledgeMcpService:
     async def read_repo_manager_segment(
         self,
         *,
-        run_id: str,
+        run_id: str | None = None,
         group_id: str | None,
         group_key: str | None,
         repo_manager_run_id: str | None,
@@ -450,7 +450,7 @@ class RepoKnowledgeMcpService:
     async def get_repo_architecture(
         self,
         *,
-        run_id: str,
+        run_id: str | None = None,
         repo_manager_run_id: str | None,
     ) -> dict:
         """Return architecture overview and merged Mermaid diagram from a repo-manager run."""
@@ -476,7 +476,7 @@ class RepoKnowledgeMcpService:
     async def get_repo_full_summary(
         self,
         *,
-        run_id: str,
+        run_id: str | None = None,
         repo_full_summary_run_id: str | None,
     ) -> dict:
         """Return the README markdown from a repo full-summary run."""
@@ -516,7 +516,7 @@ class RepoKnowledgeMcpService:
     async def get_repo_structure(
         self,
         *,
-        run_id: str,
+        run_id: str | None = None,
         max_depth: int,
         include_file_counts: bool,
     ) -> dict:
@@ -538,7 +538,15 @@ class RepoKnowledgeMcpService:
             "tree": tree,
         }
 
-    async def _get_scoped_run(self, run_id: str) -> RepoRunRecord:
+    async def _get_scoped_run(self, run_id: str | None) -> RepoRunRecord:
+        if run_id is None:
+            run = await self.run_repo.latest_completed_scoped(
+                tenant_id=self.tenant_id,
+                user_id=self.user_id,
+            )
+            if run is None:
+                raise RepoKnowledgeMcpServiceError("No completed ingestion run found")
+            return run
         run = await self.run_repo.get_scoped(
             run_id,
             tenant_id=self.tenant_id,
