@@ -14,7 +14,23 @@
       "Bash(python -m pytest tests/repo_knowledge/test_repo_full_summarizer.py tests/repo_knowledge/test_prompt_loader.py -v)",
       "Bash(python -m pytest tests/repo_knowledge/ -v)",
       "Bash(python -m pytest tests/repo_knowledge/test_prompt_loader.py tests/repo_knowledge/test_file_summarizer.py -v)",
-      "Bash(grep -l \"class.*Repository\" \"/c/Users/Jefferson Liu/Desktop/programming stuff/context-retrieval-poc/context-retrieval-backend/infrastructure/repositories/\"*.py)"
+      "Bash(grep -l \"class.*Repository\" \"/c/Users/Jefferson Liu/Desktop/programming stuff/context-retrieval-poc/context-retrieval-backend/infrastructure/repositories/\"*.py)",
+      "Bash(curl -s http://localhost:8000/health)",
+      "Bash(curl -s http://localhost:8000/)",
+      "Bash(curl -s -X POST http://localhost:8000/repo-knowledge/pipeline-runs -H 'Content-Type: application/json' -d '{ *)",
+      "Bash(curl -s http://localhost:8000/repo-knowledge/pipeline-runs/1b6f6dda-b850-4413-83cd-e3e66b462754)",
+      "Bash(curl -s http://localhost:8000/repo-knowledge/architecture)",
+      "Bash(curl -s http://localhost:8000/openapi.json)",
+      "Bash(python -c \"import sys,json; routes=json.load\\(sys.stdin\\)['paths']; [print\\(r\\) for r in routes]\")",
+      "Bash(curl -s \"http://localhost:8000/repo-knowledge/repo-manager-runs/ea8f051d-320a-409d-a2f1-c099c7f01eaf/architecture\")",
+      "Bash(curl -s \"http://localhost:8000/repo-knowledge/repo-full-summary-runs/32078dfb-1147-44ce-a174-e7008df9fed4\")",
+      "Bash(curl -s \"http://localhost:8000/repo-knowledge/pipeline-runs?limit=5\")",
+      "Bash(python -c \"import sys,json; runs=json.load\\(sys.stdin\\)['items']; [print\\(r['run_id'], r['repo_address'], r['files_seen'], r['status'], r['stage']\\) for r in runs]\")",
+      "Bash(xargs ls *)",
+      "Bash(curl -s \"http://localhost:8000/repo-knowledge/repo-manager-runs?limit=5\")",
+      "Bash(python -c \"import sys,json; runs=json.load\\(sys.stdin\\).get\\('items',[]\\); [print\\(r.get\\('id'\\), r.get\\('groups_seen'\\), r.get\\('groups_summarized'\\), r.get\\('status'\\)\\) for r in runs]\")",
+      "Bash(curl -s \"http://localhost:8000/repo-knowledge/pipeline-runs?limit=3\")",
+      "Bash(python -c \"import sys,json; runs=json.load\\(sys.stdin\\)['items']; [print\\(r['repo_manager_run_id'], r['repo_address'], r['status']\\) for r in runs]\")"
     ]
   }
 }

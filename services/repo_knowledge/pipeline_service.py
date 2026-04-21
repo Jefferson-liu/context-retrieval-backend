@@ -72,6 +72,7 @@ class RepoPipelineQueueItem:
     force_rerepo_summary: bool = False
     force_reembed: bool = False
     force_rerepo_manager: bool = False
+    git_token: str | None = None
     file_summary_run_id: str | None = None
     repo_full_summary_run_id: str | None = None
     embedding_run_id: str | None = None
@@ -115,7 +116,10 @@ class RepoKnowledgePipelineService:
         self,
         payload: RepoPipelineRunCreateRequest,
     ) -> tuple[RepoRunRecord, RepoPipelineQueueItem]:
-        """Create the source ingestion run and return queued orchestration metadata."""
+        """Create (or resume) a pipeline run and return queued orchestration metadata."""
+
+        if payload.resume_from_file_summary_run_id:
+            return await self._resume_from_file_summary(payload)
 
         run_payload = RepoRunCreateRequest(
             source_type=payload.source_type,
@@ -144,6 +148,51 @@ class RepoKnowledgePipelineService:
             force_rerepo_summary=payload.force_rerepo_summary,
             force_reembed=payload.force_reembed,
             force_rerepo_manager=payload.force_rerepo_manager,
+            git_token=payload.git_token,
+        )
+        return source_run, queue_item
+
+    async def _resume_from_file_summary(
+        self,
+        payload: RepoPipelineRunCreateRequest,
+    ) -> tuple[RepoRunRecord, RepoPipelineQueueItem]:
+        """Resume a pipeline from an existing completed file_summary_run, skipping ingestion and file summary."""
+
+        file_summary_run = await self.file_summary_run_repo.get_scoped(
+            payload.resume_from_file_summary_run_id,
+            tenant_id=self.tenant_id,
+            user_id=self.user_id,
+        )
+        if file_summary_run is None:
+            raise RepoPipelineError(
+                f"file_summary_run {payload.resume_from_file_summary_run_id!r} not found"
+            )
+        if file_summary_run.status != "completed":
+            raise RepoPipelineError(
+                f"file_summary_run {payload.resume_from_file_summary_run_id!r} is not completed (status={file_summary_run.status!r})"
+            )
+
+        source_run = await self.run_repo.get_scoped(
+            file_summary_run.source_run_id,
+            tenant_id=self.tenant_id,
+            user_id=self.user_id,
+        )
+        if source_run is None:
+            raise RepoPipelineError(
+                f"source_run {file_summary_run.source_run_id!r} linked to file_summary_run not found"
+            )
+
+        queue_item = RepoPipelineQueueItem(
+            source_run_id=source_run.id,
+            tenant_id=self.tenant_id,
+            user_id=self.user_id,
+            force_reingest=False,
+            force_refile_summary=False,
+            force_rerepo_summary=payload.force_rerepo_summary,
+            force_reembed=payload.force_reembed,
+            force_rerepo_manager=payload.force_rerepo_manager,
+            git_token=None,
+            file_summary_run_id=file_summary_run.id,
         )
         return source_run, queue_item
 
@@ -378,6 +427,7 @@ class RepoKnowledgePipelineCoordinator:
                 await ingestion_runner.enqueue(
                     source_run.id,
                     force_reingest=self.task.force_reingest,
+                    git_token=self.task.git_token,
                 )
                 self.task.ingestion_enqueued = True
             return False

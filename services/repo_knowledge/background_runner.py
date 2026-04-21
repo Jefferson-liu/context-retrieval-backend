@@ -19,6 +19,7 @@ class RepoIngestionQueueItem:
 
     run_id: str
     force_reingest: bool = False
+    git_token: str | None = None
 
 
 class RepoIngestionBackgroundRunner:
@@ -65,12 +66,13 @@ class RepoIngestionBackgroundRunner:
         self._workers.clear()
         logger.info("Repo ingestion runner stopped")
 
-    async def enqueue(self, run_id: str, *, force_reingest: bool = False) -> None:
+    async def enqueue(self, run_id: str, *, force_reingest: bool = False, git_token: str | None = None) -> None:
         """Queue a run for background processing."""
         await self._queue.put(
             RepoIngestionQueueItem(
                 run_id=run_id,
                 force_reingest=force_reingest,
+                git_token=git_token,
             )
         )
         logger.info(
@@ -92,7 +94,7 @@ class RepoIngestionBackgroundRunner:
             try:
                 async with SessionLocal() as session:
                     worker = RepoIngestionWorker(session)
-                    await worker.execute(run_id=item.run_id, force_reingest=item.force_reingest)
+                    await worker.execute(run_id=item.run_id, force_reingest=item.force_reingest, git_token=item.git_token)
                     logger.info(
                         "Repo ingestion worker finished run worker_id=%s run_id=%s force_reingest=%s",
                         worker_id,

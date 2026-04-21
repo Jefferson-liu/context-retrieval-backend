@@ -23,18 +23,25 @@ class GitCloneSourceAdapter(RepoSourceAdapter):
         include_extensions: set[str],
         excluded_dirs: set[str],
         exclude_globs: list[str],
+        git_token: str | None = None,
     ) -> None:
         self._source_url = source_path
         self._include_extensions = include_extensions
         self._excluded_dirs = excluded_dirs
         self._exclude_globs = exclude_globs
+        self._git_token = git_token
         self._root_path: Path | None = None
 
     async def prepare(self) -> SourceContext:
         tmp_dir = tempfile.mkdtemp(prefix="repo_ingest_")
-        logger.info("GitCloneSource cloning url=%s into tmp=%s", self._source_url, tmp_dir)
+        logger.info("GitCloneSource cloning url=%s into tmp=%s has_token=%s", self._source_url, tmp_dir, self._git_token is not None)
+        callbacks = None
+        if self._git_token:
+            callbacks = pygit2.RemoteCallbacks(
+                credentials=pygit2.UserPass("x-access-token", self._git_token)
+            )
         try:
-            pygit2.clone_repository(self._source_url, tmp_dir)
+            pygit2.clone_repository(self._source_url, tmp_dir, callbacks=callbacks)
         except pygit2.GitError as exc:
             shutil.rmtree(tmp_dir, ignore_errors=True)
             logger.error("GitCloneSource clone failed url=%s error=%s", self._source_url, exc)

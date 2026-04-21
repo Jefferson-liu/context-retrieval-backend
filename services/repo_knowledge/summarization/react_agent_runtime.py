@@ -63,7 +63,7 @@ async def invoke_react_agent(
         raise RuntimeError("Configured chat model does not support tool binding")
 
     agent = create_agent(chat_model, tools)
-    recursion_limit = max(10, max_iterations * 3)
+    recursion_limit = max(10, max_iterations * 5)
 
     try:
         state = await asyncio.wait_for(

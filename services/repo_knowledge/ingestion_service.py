@@ -240,7 +240,7 @@ class RepoIngestionWorker:
         self.edge_repo = RepoEdgeRepository(session)
         self.diagnostic_repo = RepoDiagnosticRepository(session)
 
-    async def execute(self, *, run_id: str, force_reingest: bool = False) -> None:
+    async def execute(self, *, run_id: str, force_reingest: bool = False, git_token: str | None = None) -> None:
         settings = get_settings()
         logger.info(
             "Repo ingestion execute start run_id=%s force_reingest=%s",
@@ -286,6 +286,7 @@ class RepoIngestionWorker:
             include_extensions=include_extensions,
             excluded_dirs=set(settings.REPO_INGEST_EXCLUDED_DIRS_LIST),
             exclude_globs=exclude_globs,
+            git_token=git_token,
         )
 
         chunking = RepoChunkingService(
@@ -539,6 +540,7 @@ class RepoIngestionWorker:
         include_extensions: set[str],
         excluded_dirs: set[str],
         exclude_globs: list[str],
+        git_token: str | None = None,
     ):
         if run.source_type == "local_path":
             logger.debug("Repo ingestion using LocalPathSourceAdapter run_id=%s", run.id)
@@ -549,12 +551,13 @@ class RepoIngestionWorker:
                 exclude_globs=exclude_globs,
             )
         if run.source_type == "git_url":
-            logger.debug("Repo ingestion using GitCloneSourceAdapter run_id=%s", run.id)
+            logger.debug("Repo ingestion using GitCloneSourceAdapter run_id=%s has_token=%s", run.id, git_token is not None)
             return GitCloneSourceAdapter(
                 source_path=run.source_locator,
                 include_extensions=include_extensions,
                 excluded_dirs=excluded_dirs,
                 exclude_globs=exclude_globs,
+                git_token=git_token,
             )
         raise RepoIngestionError(f"Unsupported source_type: {run.source_type}")
 

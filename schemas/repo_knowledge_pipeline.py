@@ -35,8 +35,10 @@ class RepoPipelineRunCreateRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     source_type: SourceType = Field(default="local_path")
-    source_path: str = Field(..., min_length=1, description="Local path to a repository root.")
+    source_path: str = Field(..., min_length=1, description="Local path or git URL to a repository.")
     repo_address: str | None = Field(default=None, description="Logical repository identifier.")
+    git_token: str | None = Field(default=None, description="Token for cloning private git repositories. Never stored.")
+    resume_from_file_summary_run_id: str | None = Field(default=None, description="Skip ingestion and file summary — resume pipeline from this completed file_summary_run_id.")
     include_extensions: list[str] | None = Field(default=None)
     exclude_globs: list[str] | None = Field(default=None)
     force_reingest: bool = Field(default=False)

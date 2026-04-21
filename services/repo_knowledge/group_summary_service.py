@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import logging
 from dataclasses import dataclass
@@ -448,25 +449,32 @@ class RepoGroupSummaryWorker:
             )
             segment_artifacts: list[ArchitectureSegmentArtifact] = []
 
+            # Build all inputs upfront
+            group_inputs: list[tuple] = []
             for group in build_result.groups:
-                try:
-                    members = sorted(group.members, key=lambda item: item.rank)
-                    evidence = [
-                        GroupMemberEvidence(
-                            subject_id=member.subject_id,
-                            subject_path=node_by_id[member.subject_id].subject_path,
-                            language=node_by_id[member.subject_id].language,
-                            overall_summary=node_by_id[member.subject_id].overall_summary,
-                            group_function=node_by_id[member.subject_id].group_function,
-                            important_relationships=node_by_id[member.subject_id].important_relationships,
-                            is_representative=member.is_representative,
-                            rank=member.rank,
-                        )
-                        for member in members
-                        if member.subject_id in node_by_id
-                    ]
+                members = sorted(group.members, key=lambda item: item.rank)
+                evidence = [
+                    GroupMemberEvidence(
+                        subject_id=member.subject_id,
+                        subject_path=node_by_id[member.subject_id].subject_path,
+                        language=node_by_id[member.subject_id].language,
+                        overall_summary=node_by_id[member.subject_id].overall_summary,
+                        group_function=node_by_id[member.subject_id].group_function,
+                        important_relationships=node_by_id[member.subject_id].important_relationships,
+                        is_representative=member.is_representative,
+                        rank=member.rank,
+                    )
+                    for member in members
+                    if member.subject_id in node_by_id
+                ]
+                group_inputs.append((group, evidence))
 
-                    result = await summarizer.summarize(
+            # Run all LLM summarizations concurrently (no DB access in summarizer)
+            sem = asyncio.Semaphore(5)
+
+            async def _summarize_one(group, evidence):
+                async with sem:
+                    return await summarizer.summarize(
                         payload=GroupSummaryInput(
                             source_run_id=run.source_run_id,
                             source_file_summary_run_id=run.source_file_summary_run_id,
@@ -482,6 +490,45 @@ class RepoGroupSummaryWorker:
                         )
                     )
 
+            results = await asyncio.gather(
+                *[_summarize_one(group, evidence) for group, evidence in group_inputs],
+                return_exceptions=True,
+            )
+
+            # Write results to DB sequentially (shared session)
+            for (group, _evidence), result in zip(group_inputs, results):
+                if isinstance(result, TraceableLLMError):
+                    counters.groups_failed += 1
+                    await self.group_summary_diagnostic_repo.create(
+                        group_summary_run_id=run.id,
+                        group_id=group.group_id,
+                        severity="error",
+                        message=result.message,
+                        details={
+                            "stage": result.stage,
+                            "diagnostic_code": result.diagnostic_code,
+                            "group_key": group.group_key,
+                            "error": result.details.get("error", str(result)),
+                            "error_type": result.details.get("error_type", type(result).__name__),
+                            "raw_text": result.raw_text,
+                        },
+                    )
+                elif isinstance(result, Exception):
+                    counters.groups_failed += 1
+                    await self.group_summary_diagnostic_repo.create(
+                        group_summary_run_id=run.id,
+                        group_id=group.group_id,
+                        severity="error",
+                        message="repo_manager_segment_failed",
+                        details={
+                            "stage": "repo_manager_segment",
+                            "diagnostic_code": "repo_manager_segment_runtime_failed",
+                            "group_key": group.group_key,
+                            "error": str(result),
+                            "error_type": type(result).__name__,
+                        },
+                    )
+                else:
                     await self.group_summary_repo.upsert(
                         group_summary_run_id=run.id,
                         group_id=group.group_id,
@@ -509,46 +556,15 @@ class RepoGroupSummaryWorker:
                         )
                     )
                     counters.groups_summarized += 1
-                except TraceableLLMError as exc:  # pragma: no cover - runtime LLM failures
-                    counters.groups_failed += 1
-                    await self.group_summary_diagnostic_repo.create(
-                        group_summary_run_id=run.id,
-                        group_id=group.group_id,
-                        severity="error",
-                        message=exc.message,
-                        details={
-                            "stage": exc.stage,
-                            "diagnostic_code": exc.diagnostic_code,
-                            "group_key": group.group_key,
-                            "error": exc.details.get("error", str(exc)),
-                            "error_type": exc.details.get("error_type", type(exc).__name__),
-                            "raw_text": exc.raw_text,
-                        },
-                    )
-                except Exception as exc:  # pragma: no cover - non-LLM runtime failures
-                    counters.groups_failed += 1
-                    await self.group_summary_diagnostic_repo.create(
-                        group_summary_run_id=run.id,
-                        group_id=group.group_id,
-                        severity="error",
-                        message="repo_manager_segment_failed",
-                        details={
-                            "stage": "repo_manager_segment",
-                            "diagnostic_code": "repo_manager_segment_runtime_failed",
-                            "group_key": group.group_key,
-                            "error": str(exc),
-                            "error_type": type(exc).__name__,
-                        },
-                    )
 
-                await self.group_summary_run_repo.set_counts(
-                    run,
-                    groups_seen=counters.groups_seen,
-                    groups_summarized=counters.groups_summarized,
-                    groups_failed=counters.groups_failed,
-                    members_seen=counters.members_seen,
-                )
-                await self.session.commit()
+            await self.group_summary_run_repo.set_counts(
+                run,
+                groups_seen=counters.groups_seen,
+                groups_summarized=counters.groups_summarized,
+                groups_failed=counters.groups_failed,
+                members_seen=counters.members_seen,
+            )
+            await self.session.commit()
 
             if counters.groups_summarized == 0:
                 await self.group_summary_run_repo.mark_failed(
