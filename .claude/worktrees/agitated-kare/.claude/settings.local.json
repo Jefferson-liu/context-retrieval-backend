@@ -1,0 +1,17 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(wc -l \"/c/Users/Jefferson Liu/Desktop/programming stuff/context-retrieval-poc/context-retrieval-backend\"/**/*.py)",
+      "Bash(grep -l \"RepoGroupSummaryRunRepository\\\\|RepoGroupSummaryRepository\" \"/c/Users/Jefferson Liu/Desktop/programming stuff/context-retrieval-poc/context-retrieval-backend/infrastructure/repositories/\"*.py)",
+      "Bash(git add -A)",
+      "Bash(git commit:*)",
+      "Bash(git merge repo-summary --no-edit)",
+      "Bash(ls .venv*)",
+      "Bash(ls ../.venv*)",
+      "Bash(PYTHONPATH=\".\" \"C:/Users/Jefferson Liu/Desktop/programming stuff/context-retrieval-poc/context-retrieval-backend/.venv/Scripts/pytest.exe\" -q tests/repo_knowledge)",
+      "Bash(PYTHONPATH=\".\" \"C:/Users/Jefferson Liu/Desktop/programming stuff/context-retrieval-poc/context-retrieval-backend/.venv/Scripts/python.exe\" -c \"import main\")",
+      "mcp__Claude_Preview__preview_start",
+      "Bash(timeout 10 \"C:/Users/Jefferson Liu/Desktop/programming stuff/context-retrieval-poc/context-retrieval-backend/.venv/Scripts/python.exe\" -c \"import main\")"
+    ]
+  }
+}
