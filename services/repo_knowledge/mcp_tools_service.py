@@ -380,35 +380,12 @@ class RepoKnowledgeMcpService:
             "offset": offset,
             "include_members": include_members,
             "items": [
-                {
-                    "group_id": group.group_id,
-                    "group_key": group.group_key,
-                    "group_label": group.group_label,
-                    "layer_hint": group.layer_hint,
-                    "member_count": group.member_count,
-                    "dependency_neighbor_count": group.dependency_neighbor_count,
-                    "is_infrastructure_seed": group.is_infrastructure_seed,
-                    "name": summary.name if summary else None,
-                    "overall_summary": summary.overall_summary if summary else None,
-                    "business_purpose": summary.business_purpose if summary else None,
-                    "responsibilities": list(summary.responsibilities or []) if summary else [],
-                    "tags": list(summary.tags or []) if summary else [],
-                    "representative_subject_ids": list(summary.representative_subject_ids or []) if summary else [],
-                    "is_infrastructure": summary.is_infrastructure if summary else None,
-                    "confidence": float(summary.confidence) if summary else None,
-                    "updated_at": summary.updated_at.isoformat() if summary and summary.updated_at else None,
-                    "members": [
-                        {
-                            "subject_id": subject.id,
-                            "subject_path": subject.subject_path,
-                            "language": subject.language,
-                            "rank": member.rank,
-                            "is_representative": member.is_representative,
-                            "membership_reason": member.membership_reason,
-                        }
-                        for member, subject in member_map.get(group.group_id, [])
-                    ],
-                }
+                _build_module_list_item(
+                    group=group,
+                    summary=summary,
+                    include_members=include_members,
+                    member_map=member_map,
+                )
                 for group, summary in rows
             ],
         }
@@ -563,12 +540,24 @@ class RepoKnowledgeMcpService:
                 continue
             _insert_path(root=root, path=path)
 
-        tree = _render_tree(node=root, depth=0, max_depth=max(1, max_depth), include_file_counts=include_file_counts)
+        depth = max(1, max_depth)
+        if include_file_counts:
+            _count_files(root)
+        lines: list[str] = []
+        _render_tree_text(
+            node=root,
+            depth=0,
+            max_depth=depth,
+            include_file_counts=include_file_counts,
+            indent="",
+            is_root=True,
+            out=lines,
+        )
         return {
             "run_id": run.id,
-            "max_depth": max(1, max_depth),
+            "max_depth": depth,
             "include_file_counts": include_file_counts,
-            "tree": tree,
+            "tree": "\n".join(lines),
         }
 
     async def get_file_content(
@@ -1056,6 +1045,89 @@ def _render_tree(*, node: dict, depth: int, max_depth: int, include_file_counts:
     files.sort(key=lambda item: item["name"])
     payload["children"] = dirs + files
     return payload
+
+
+def _build_module_list_item(
+    *,
+    group,
+    summary,
+    include_members: bool,
+    member_map: dict,
+) -> dict:
+    """Compact per-module row for list_modules. Heavy fields live on get_module."""
+    item: dict = {
+        "group_key": group.group_key,
+        "group_label": group.group_label,
+        "member_count": group.member_count,
+        "name": summary.name if summary else None,
+        "overall_summary": summary.overall_summary if summary else None,
+        "responsibilities": list(summary.responsibilities or []) if summary else [],
+        "tags": list(summary.tags or []) if summary else [],
+        "is_infrastructure": summary.is_infrastructure if summary else None,
+    }
+    if include_members:
+        item["group_id"] = group.group_id
+        item["members"] = [
+            {
+                "subject_id": subject.id,
+                "subject_path": subject.subject_path,
+                "language": subject.language,
+                "rank": member.rank,
+                "is_representative": member.is_representative,
+                "membership_reason": member.membership_reason,
+            }
+            for member, subject in member_map.get(group.group_id, [])
+        ]
+    return item
+
+
+def _render_tree_text(
+    *,
+    node: dict,
+    depth: int,
+    max_depth: int,
+    include_file_counts: bool,
+    indent: str,
+    is_root: bool,
+    out: list[str],
+) -> None:
+    """Render the tree as indented plain text lines.
+
+    Directories end with '/'; file counts appear in parens when requested. Depth cutoff
+    is marked with '…' on the parent line.
+    """
+    if node["type"] == "file":
+        out.append(f"{indent}{node['name']}")
+        return
+
+    if is_root:
+        label = "/"
+    else:
+        label = f"{node['name']}/"
+        if include_file_counts:
+            label = f"{label} ({node.get('file_count', 0)})"
+
+    if depth >= max_depth and node["children"]:
+        out.append(f"{indent}{label} …")
+        return
+
+    out.append(f"{indent}{label}")
+
+    child_indent = indent + "  "
+    dirs = [c for c in node["children"].values() if c["type"] == "dir"]
+    files = [c for c in node["children"].values() if c["type"] == "file"]
+    dirs.sort(key=lambda c: c["name"])
+    files.sort(key=lambda c: c["name"])
+    for child in dirs + files:
+        _render_tree_text(
+            node=child,
+            depth=depth + 1,
+            max_depth=max_depth,
+            include_file_counts=include_file_counts,
+            indent=child_indent,
+            is_root=False,
+            out=out,
+        )
 
 
 def _truncate_line(text: str, max_line_length: int) -> str:

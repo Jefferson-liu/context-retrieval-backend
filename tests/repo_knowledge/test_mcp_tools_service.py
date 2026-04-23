@@ -450,7 +450,8 @@ def test_list_repo_manager_segments_returns_groups_without_members() -> None:
     assert result["repo_manager_run_id"] == "rmr-1"
     assert len(result["items"]) == 1
     assert result["items"][0]["group_key"] == "services/auth"
-    assert result["items"][0]["members"] == []
+    assert "members" not in result["items"][0]
+    assert "group_id" not in result["items"][0]
 
 
 def test_list_repo_manager_segments_fetches_members_when_requested() -> None:

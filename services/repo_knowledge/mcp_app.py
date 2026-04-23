@@ -112,7 +112,7 @@ async def file_tree(
 )
 async def list_modules(
     run_id: str | None = None,
-    limit: int = 100,
+    limit: int = 20,
     offset: int = 0,
     layer_hint: str | None = None,
     is_infrastructure: bool | None = None,
